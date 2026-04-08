@@ -1,4 +1,4 @@
-"""Recommendation utilities for scoring candidate defensive schemes."""
+"""Simulation and recommendation utilities for candidate defensive schemes."""
 
 from __future__ import annotations
 
@@ -6,30 +6,13 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from .scheme_profiles import DEFAULT_SCHEME_PROFILES
 from .training import TrainingArtifacts, prepare_training_matrices
-
-DEFAULT_SCHEME_PROFILES: dict[str, dict[str, float]] = {
-    "Drop": {
-        "pick_and_roll_roll_man_ppp_mean": -0.08,
-        "pick_and_roll_ball_handler_ppp_mean": 0.03,
-        "spot_up_ppp_mean": 0.02,
-    },
-    "Switch": {
-        "isolation_ppp_mean": -0.05,
-        "pick_and_roll_ball_handler_ppp_mean": -0.04,
-        "pick_and_roll_roll_man_ppp_mean": 0.05,
-    },
-    "Zone": {
-        "isolation_ppp_mean": -0.03,
-        "spot_up_ppp_mean": 0.06,
-        "spot_up_percentile_mean": -4.0,
-    },
-}
 
 
 @dataclass
 class SchemeRecommendation:
-    """Recommendation output for a single lineup row."""
+    """Simulation and recommendation output for a single lineup row."""
 
     recommended_scheme: str
     predicted_value: float
@@ -42,7 +25,7 @@ def recommend_scheme(
     artifacts: TrainingArtifacts,
     scheme_profiles: dict[str, dict[str, float]] | None = None,
 ) -> SchemeRecommendation:
-    """Score candidate defensive schemes for a lineup and return the best option."""
+    """Simulate candidate defensive schemes for a lineup and return the best option."""
     scheme_profiles = scheme_profiles or DEFAULT_SCHEME_PROFILES
     lineup_frame = _coerce_lineup_frame(lineup_row)
     base_features, _ = prepare_training_matrices(
@@ -102,7 +85,7 @@ def recommend_scheme(
 
 
 def apply_scheme_profile(features: pd.DataFrame, adjustments: dict[str, float]) -> pd.DataFrame:
-    """Apply additive scheme-specific adjustments to a lineup feature row."""
+    """Apply additive simulator adjustments to a lineup feature row."""
     adjusted = features.copy()
     for feature_name, delta in adjustments.items():
         if feature_name in adjusted.columns:

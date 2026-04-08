@@ -2,12 +2,12 @@
 
 from .base import BaseSchemeModel
 from .recommendation import (
-    DEFAULT_SCHEME_PROFILES,
     SchemeRecommendation,
     apply_scheme_profile,
     recommend_scheme,
 )
 from .scheme_recommender import XGBoostSchemeRecommender
+from .scheme_profiles import DEFAULT_SCHEME_PROFILES
 from .training import (
     DEFAULT_TARGET_COLUMN,
     TARGET_OPTIONS,

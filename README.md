@@ -34,11 +34,13 @@ NBA-defense-optimizer/
 │   └── models/
 │       ├── __init__.py
 │       ├── base.py
+│       ├── recommendation.py
 │       ├── scheme_recommender.py
 │       └── training.py
 ├── build_features.py
 ├── ingest.py
 ├── project-proposal.txt
+├── recommend_scheme.py
 ├── train_model.py
 └── requirements.txt
 ```
@@ -189,16 +191,39 @@ Live NBA API validation note:
 - The original blocker was a broken shell proxy configuration plus mismatched Synergy endpoint arguments.
 - `python ingest.py` now successfully writes raw snapshots and populates the SQLite database with live player, play-type, and lineup data.
 
+## Phase 4 Status
+
+Phase 4 is the recommendation and explanation phase. The implementation goal is:
+
+1. Score candidate defensive schemes for a lineup using the baseline model.
+2. Keep scheme logic explicit and editable while true scheme labels are still unavailable.
+3. Return a ranked recommendation rather than only a raw predicted outcome.
+4. Expose explanation data to support coach-readable output.
+
+Phase 4 deliverables now implemented:
+
+1. A recommendation layer in `src/models/recommendation.py`.
+2. Explicit candidate scheme profiles for `Drop`, `Switch`, and `Zone`.
+3. SHAP-backed explanation support through the trained XGBoost model.
+4. A CLI entry point in `recommend_scheme.py`.
+5. Automated tests for scheme adjustment and recommendation ranking.
+
+Phase 4 limitation:
+
+- The recommendation engine currently applies explicit feature adjustments for each scheme and scores the adjusted lineup with the baseline outcome model.
+- This is a practical bridge to a recommendation system, but it is still a proxy for true historical scheme outcome modeling.
+- Once you have scheme-aware labels or possession-level scheme tagging, these profiles should be replaced by learned scheme-specific training targets.
+
 ## Current Plan
 
-After Phase 3, the next implementation steps should be:
+After Phase 4, the next implementation steps should be:
 
 1. Expand ingestion to collect stable historical windows instead of a single snapshot.
 2. Add any missing context tables needed for matchup or game-window features.
-3. Introduce a recommendation layer that scores candidate schemes rather than only predicting lineup outcome.
-4. Add SHAP-based explanation outputs for coach-readable recommendations.
+3. Replace heuristic scheme profiles with scheme-aware training data.
+4. Add richer context such as coaching directives, opponent archetypes, and game state.
 5. Package a recommendation interface for course demos.
-6. Replace surrogate targets with scheme-aware labels or candidate-scheme scoring logic.
+6. Add persistence for recommendation runs and explanations.
 
 ## How To Run
 
@@ -242,6 +267,12 @@ Train the Phase 3 baseline model with:
 
 ```bash
 python train_model.py
+```
+
+Generate a Phase 4 recommendation with:
+
+```bash
+python recommend_scheme.py
 ```
 
 ## Notes On Data Quality

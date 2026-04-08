@@ -73,15 +73,20 @@ def prepare_training_matrices(
     if filtered.empty:
         raise ValueError(f"No rows remain after dropping null values for '{target_column}'.")
 
-    feature_columns = [
-        column
-        for column in filtered.columns
-        if column not in NON_FEATURE_COLUMNS and pd.api.types.is_numeric_dtype(filtered[column])
-    ]
+    coerced_numeric_columns: dict[str, pd.Series] = {}
+    for column in filtered.columns:
+        if column in NON_FEATURE_COLUMNS:
+            continue
+
+        numeric_series = pd.to_numeric(filtered[column], errors="coerce")
+        if numeric_series.notna().any():
+            coerced_numeric_columns[column] = numeric_series
+
+    feature_columns = list(coerced_numeric_columns.keys())
     if not feature_columns:
         raise ValueError("No numeric feature columns are available for model training.")
 
-    features = filtered[feature_columns].copy()
+    features = pd.DataFrame(coerced_numeric_columns, index=filtered.index)
     features = features.fillna(features.mean(numeric_only=True))
     features = features.fillna(0.0)
     target = filtered[target_column].astype(float)

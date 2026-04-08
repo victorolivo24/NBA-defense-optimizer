@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import shap
 from xgboost import XGBRegressor
 
 from .base import BaseSchemeModel
@@ -44,3 +45,9 @@ class XGBoostSchemeRecommender(BaseSchemeModel):
                 "importance": self.model.feature_importances_,
             }
         ).sort_values("importance", ascending=False)
+
+    def explain(self, features: pd.DataFrame) -> pd.DataFrame:
+        """Return SHAP values for the supplied feature rows."""
+        explainer = shap.TreeExplainer(self.model)
+        shap_values = explainer.shap_values(features)
+        return pd.DataFrame(shap_values, columns=features.columns, index=features.index)

@@ -3,6 +3,9 @@ __pycache__/
 *.sqlite
 *.db
 .ipynb_checkpoints/
+.pytest_cache/
+tests/.tmp/
+pytest-cache-files-*/
 data/raw/*
 !data/raw/.gitkeep
 data/processed/*

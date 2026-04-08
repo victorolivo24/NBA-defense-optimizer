@@ -1,0 +1,8 @@
+nba_api
+pandas
+sqlalchemy
+xgboost
+shap
+scikit-learn
+numpy
+requests

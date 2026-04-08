@@ -1,0 +1,46 @@
+"""Placeholder XGBoost model implementation."""
+
+from __future__ import annotations
+
+import pandas as pd
+from xgboost import XGBRegressor
+
+from .base import BaseSchemeModel
+
+
+class XGBoostSchemeRecommender(BaseSchemeModel):
+    """
+    Baseline regressor placeholder for defensive rating prediction.
+
+    This can later be replaced with:
+    - a classifier over scheme labels
+    - one model per scheme with expected points saved outputs
+    - a ranking model over candidate defensive coverages
+    """
+
+    def __init__(self) -> None:
+        self.model = XGBRegressor(
+            n_estimators=200,
+            max_depth=4,
+            learning_rate=0.05,
+            subsample=0.9,
+            colsample_bytree=0.9,
+            objective="reg:squarederror",
+            random_state=42,
+        )
+        self.feature_names: list[str] = []
+
+    def fit(self, features: pd.DataFrame, target: pd.Series) -> None:
+        self.feature_names = list(features.columns)
+        self.model.fit(features, target)
+
+    def predict(self, features: pd.DataFrame):
+        return self.model.predict(features)
+
+    def feature_importance(self) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "feature": self.feature_names,
+                "importance": self.model.feature_importances_,
+            }
+        ).sort_values("importance", ascending=False)

@@ -34,10 +34,12 @@ NBA-defense-optimizer/
 │   └── models/
 │       ├── __init__.py
 │       ├── base.py
-│       └── scheme_recommender.py
+│       ├── scheme_recommender.py
+│       └── training.py
 ├── build_features.py
 ├── ingest.py
 ├── project-proposal.txt
+├── train_model.py
 └── requirements.txt
 ```
 
@@ -45,7 +47,7 @@ NBA-defense-optimizer/
 
 ### 1. Database layer
 
-The database scaffold lives in [src/database/schema.py](/c:/Users/victo/Downloads/cs210/NBA-defense-optimizer/src/database/schema.py) and [src/database/connection.py](/c:/Users/victo/Downloads/cs210/NBA-defense-optimizer/src/database/connection.py).
+The database scaffold lives in `src/database/schema.py` and `src/database/connection.py`.
 
 It includes:
 
@@ -66,7 +68,7 @@ Important note:
 
 ### 2. Ingestion scaffold
 
-The ingestion logic lives in [src/database/ingest.py](/c:/Users/victo/Downloads/cs210/NBA-defense-optimizer/src/database/ingest.py), with a thin CLI entry point in [ingest.py](/c:/Users/victo/Downloads/cs210/NBA-defense-optimizer/ingest.py).
+The ingestion logic lives in `src/database/ingest.py`, with a thin CLI entry point in `ingest.py`.
 
 Phase 1 now includes:
 
@@ -93,7 +95,7 @@ Raw snapshot rationale:
 
 ### 3. Model layer placeholder
 
-The model scaffold lives in [src/models/base.py](/c:/Users/victo/Downloads/cs210/NBA-defense-optimizer/src/models/base.py) and [src/models/scheme_recommender.py](/c:/Users/victo/Downloads/cs210/NBA-defense-optimizer/src/models/scheme_recommender.py).
+The model scaffold lives in `src/models/base.py` and `src/models/scheme_recommender.py`.
 
 This is intentionally modular:
 
@@ -103,7 +105,7 @@ This is intentionally modular:
 
 ### 4. Feature engineering layer
 
-Phase 2 adds a dedicated feature pipeline in [src/features/lineup_dataset.py](/c:/Users/victo/Downloads/cs210/NBA-defense-optimizer/src/features/lineup_dataset.py).
+Phase 2 adds a dedicated feature pipeline in `src/features/lineup_dataset.py`.
 
 This layer:
 
@@ -111,11 +113,11 @@ This layer:
 - Pulls each player's defensive play-type profile.
 - Aggregates lineup-level features such as position counts, average size, and play-type PPP summaries.
 - Produces model-ready rows with targets like `defensive_rating_target` and `opponent_ppp_target`.
-- Exports the dataset to CSV through [build_features.py](/c:/Users/victo/Downloads/cs210/NBA-defense-optimizer/build_features.py).
+- Exports the dataset to CSV through `build_features.py`.
 
 ### 5. Dependency list
 
-[requirements.txt](/c:/Users/victo/Downloads/cs210/NBA-defense-optimizer/requirements.txt) includes the core libraries you requested:
+`requirements.txt` includes the core libraries you requested:
 
 - `nba_api`
 - `pandas`
@@ -156,16 +158,47 @@ Phase 2 deliverables now implemented:
 3. A CSV export entry point for offline training workflows.
 4. Automated tests for lineup feature aggregation and dataset export.
 
+## Phase 3 Status
+
+Phase 3 is the baseline target-definition and model-training phase. The implementation goal is:
+
+1. Decide on a target the model can learn from with the currently available data.
+2. Keep that target definition explicit so it can be replaced later with real scheme labels.
+3. Train and evaluate a baseline model on the engineered lineup dataset.
+4. Test the training pipeline before moving into recommendation logic.
+
+Phase 3 deliverables now implemented:
+
+1. A training helper module in `src/models/training.py`.
+2. Explicit target options for `defensive_rating_target` and `opponent_ppp_target`.
+3. A baseline XGBoost training and evaluation path.
+4. A CLI entry point in `train_model.py`.
+5. Automated tests for matrix preparation and baseline training.
+
+Current target note:
+
+- The project does not yet have true historical defensive-scheme labels.
+- Phase 3 therefore uses lineup defensive outcome targets as a surrogate learning problem.
+- The default baseline target is `defensive_rating_target`.
+- When the live lineup endpoint does not expose a direct defensive rating, the ingestion layer derives a fallback target from opponent points allowed per 48 minutes.
+- This is not the final scheme recommendation target; it is the first defensible supervised training step.
+
+Live NBA API validation note:
+
+- The ingestion code is wired to the real `nba_api` endpoints and has now been validated end to end in this repo environment.
+- The original blocker was a broken shell proxy configuration plus mismatched Synergy endpoint arguments.
+- `python ingest.py` now successfully writes raw snapshots and populates the SQLite database with live player, play-type, and lineup data.
+
 ## Current Plan
 
-After Phase 2, the next implementation steps should be:
+After Phase 3, the next implementation steps should be:
 
 1. Expand ingestion to collect stable historical windows instead of a single snapshot.
 2. Add any missing context tables needed for matchup or game-window features.
-3. Define a target variable for scheme recommendation.
-4. Train a baseline `XGBoost` regressor or classifier.
-5. Add SHAP-based explanation outputs for coach-readable recommendations.
-6. Package a recommendation interface for course demos.
+3. Introduce a recommendation layer that scores candidate schemes rather than only predicting lineup outcome.
+4. Add SHAP-based explanation outputs for coach-readable recommendations.
+5. Package a recommendation interface for course demos.
+6. Replace surrogate targets with scheme-aware labels or candidate-scheme scoring logic.
 
 ## How To Run
 
@@ -203,6 +236,12 @@ Build the Phase 2 training dataset with:
 
 ```bash
 python build_features.py
+```
+
+Train the Phase 3 baseline model with:
+
+```bash
+python train_model.py
 ```
 
 ## Notes On Data Quality

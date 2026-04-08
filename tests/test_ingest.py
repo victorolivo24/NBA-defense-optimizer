@@ -54,6 +54,26 @@ def test_normalize_lineup_records_skips_invalid_rows():
     assert records[0]["opponent_ppp"] == 1.102
 
 
+def test_normalize_lineup_records_derives_fallback_target_from_points_and_minutes():
+    df = pd.DataFrame(
+        [
+            {
+                "GROUP_ID": "-201939-202691-203110-203952-1626172-",
+                "GROUP_NAME": "Live Style Lineup",
+                "TEAM_ABBREVIATION": "GSW",
+                "MIN": 24.0,
+                "PTS": 54.0,
+            }
+        ]
+    )
+
+    records = normalize_lineup_records(df, "2024-25")
+
+    assert len(records) == 1
+    assert records[0]["defensive_rating"] == 108.0
+    assert records[0]["opponent_ppp"] == 1.08
+
+
 def test_save_raw_frame_writes_snapshot(tmp_path: Path):
     df = pd.DataFrame([{"PLAYER_ID": 1, "PLAYER_NAME": "Test Player"}])
     config = IngestConfig(raw_data_dir=str(tmp_path), sleep_seconds=0)

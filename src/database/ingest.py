@@ -306,9 +306,14 @@ def normalize_lineup_records(lineups_df: pd.DataFrame, season: str) -> list[dict
             or row.get("DEF_POSS")
             or row.get("POSS_EST")
         )
-        defensive_rating = _safe_float(
+        raw_defensive_rating = _safe_float(
             row.get("DEF_RATING") or row.get("DEFRTG") or row.get("DEF_RTG")
         )
+        minutes_played = _safe_float(row.get("MIN") or row.get("MINUTES"))
+        points_allowed = _safe_float(row.get("PTS"))
+        defensive_rating = raw_defensive_rating
+        if defensive_rating is None:
+            defensive_rating = _derive_points_allowed_per_48(points_allowed, minutes_played)
 
         normalized.append(
             {
@@ -316,7 +321,7 @@ def normalize_lineup_records(lineups_df: pd.DataFrame, season: str) -> list[dict
                 "lineup_name": row.get("GROUP_NAME") or row.get("LINEUP_NAME"),
                 "season": season,
                 "team_abbreviation": row.get("TEAM_ABBREVIATION") or row.get("TEAM_ABBREV"),
-                "minutes_played": _safe_float(row.get("MIN") or row.get("MINUTES")),
+                "minutes_played": minutes_played,
                 "possessions": possessions,
                 "defensive_rating": defensive_rating,
                 "opponent_ppp": _derive_opponent_ppp(defensive_rating),
@@ -418,6 +423,23 @@ def _derive_opponent_ppp(defensive_rating: float | None) -> float | None:
     if defensive_rating is None:
         return None
     return defensive_rating / 100.0
+
+
+def _derive_points_allowed_per_48(
+    points_allowed: float | None,
+    minutes_played: float | None,
+) -> float | None:
+    """
+    Derive a stable fallback target from lineup points allowed and minutes played.
+
+    The live lineup endpoint currently returns opponent points (`PTS`) and minutes,
+    but not a direct defensive rating or possession count. For Phase 3 we use
+    points allowed per 48 minutes as the baseline surrogate target when a true
+    defensive rating is unavailable.
+    """
+    if points_allowed is None or minutes_played in (None, 0):
+        return None
+    return (points_allowed / minutes_played) * 48.0
 
 
 def _normalize_play_type_label(play_type: str) -> str:

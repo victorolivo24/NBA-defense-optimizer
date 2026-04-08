@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+
+def utc_now() -> datetime:
+    """Return a UTC timestamp without timezone metadata for SQLite compatibility."""
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 class Base(DeclarativeBase):
@@ -25,7 +30,7 @@ class Player(Base):
     height: Mapped[str | None] = mapped_column(String(16), nullable=True)
     weight: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_active: Mapped[bool] = mapped_column(default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     defensive_play_types: Mapped[list["DefensivePlayType"]] = relationship(
         back_populates="player", cascade="all, delete-orphan"
@@ -58,7 +63,7 @@ class DefensivePlayType(Base):
     frequency_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     percentile: Mapped[float | None] = mapped_column(Float, nullable=True)
     source: Mapped[str] = mapped_column(String(64), default="nba_api")
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
 
     player: Mapped["Player"] = relationship(back_populates="defensive_play_types")
 
@@ -73,14 +78,16 @@ class LineupMetric(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     lineup_key: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    lineup_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     season: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    team_abbreviation: Mapped[str | None] = mapped_column(String(8), nullable=True)
     minutes_played: Mapped[float | None] = mapped_column(Float, nullable=True)
     possessions: Mapped[float | None] = mapped_column(Float, nullable=True)
     defensive_rating: Mapped[float | None] = mapped_column(Float, nullable=True)
     opponent_ppp: Mapped[float | None] = mapped_column(Float, nullable=True)
     recommended_scheme: Mapped[str | None] = mapped_column(String(32), nullable=True)
     observed_scheme: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     players: Mapped[list["LineupPlayer"]] = relationship(
         back_populates="lineup", cascade="all, delete-orphan"

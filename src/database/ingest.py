@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,9 +27,16 @@ LOGGER = logging.getLogger(__name__)
 class IngestConfig:
     season: str = "2024-25"
     season_type: str = "Regular Season"
+    synergy_play_types: tuple[tuple[str, str], ...] = (
+        ("Isolation", "Isolation"),
+        ("Pick and Roll Ball Handler", "PRBallHandler"),
+        ("Pick and Roll Roll Man", "PRRollman"),
+        ("Spot Up", "Spotup"),
+    )
     sleep_seconds: float = 1.5
     max_retries: int = 3
     backoff_seconds: float = 2.0
+    disable_env_proxies: bool = True
     database_url: str = DEFAULT_DATABASE_URL
     raw_data_dir: str = "data/raw"
 
@@ -47,20 +56,27 @@ def fetch_player_defense_stats(config: IngestConfig) -> pd.DataFrame:
 
 
 def fetch_defensive_play_type_stats(config: IngestConfig) -> pd.DataFrame:
-    """Fetch defensive play-type data with retry and backoff."""
-    return _fetch_dataframe(
-        endpoint_name="defensive_play_types",
-        endpoint_factory=synergyplaytypes.SynergyPlayTypes,
-        endpoint_kwargs={
-            "league_id_nullable": "00",
-            "per_mode_simple": "Totals",
-            "player_or_team_abbreviation": "P",
-            "season": config.season,
-            "season_type_all_star": config.season_type,
-            "type_grouping_nullable": "defensive",
-        },
-        config=config,
-    )
+    """Fetch defensive play-type data with the supported Synergy endpoint arguments."""
+    frames: list[pd.DataFrame] = []
+
+    for display_name, api_value in config.synergy_play_types:
+        df = _fetch_dataframe(
+            endpoint_name=f"defensive_play_types_{api_value.lower()}",
+            endpoint_factory=synergyplaytypes.SynergyPlayTypes,
+            endpoint_kwargs={
+                "play_type_nullable": api_value,
+                "type_grouping_nullable": "Defensive",
+                "player_or_team_abbreviation": "P",
+                "season": config.season,
+                "season_type_all_star": config.season_type,
+            },
+            config=config,
+        )
+        if "PLAY_TYPE" not in df.columns:
+            df["PLAY_TYPE"] = display_name
+        frames.append(df)
+
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
 def fetch_lineup_defense_stats(config: IngestConfig) -> pd.DataFrame:
@@ -121,6 +137,10 @@ def upsert_defensive_play_types(
             player.nba_player_id: player.id
             for player in session.execute(select(Player)).scalars().all()
         }
+        existing_records = {
+            (record.player_id, record.season, record.play_type): record
+            for record in session.execute(select(DefensivePlayType)).scalars().all()
+        }
 
         inserted = 0
         for row in play_types_df.to_dict(orient="records"):
@@ -128,14 +148,11 @@ def upsert_defensive_play_types(
             if nba_player_id is None or nba_player_id not in player_lookup:
                 continue
 
-            play_type = row.get("PLAY_TYPE") or row.get("PlayType") or "Unknown"
-            existing = session.execute(
-                select(DefensivePlayType).where(
-                    DefensivePlayType.player_id == player_lookup[nba_player_id],
-                    DefensivePlayType.season == season,
-                    DefensivePlayType.play_type == play_type,
-                )
-            ).scalar_one_or_none()
+            play_type = _normalize_play_type_label(
+                row.get("PLAY_TYPE") or row.get("PlayType") or "Unknown"
+            )
+            record_key = (player_lookup[nba_player_id], season, play_type)
+            existing = existing_records.get(record_key)
 
             payload = {
                 "player_id": player_lookup[nba_player_id],
@@ -150,7 +167,9 @@ def upsert_defensive_play_types(
             }
 
             if existing is None:
-                session.add(DefensivePlayType(**payload))
+                existing = DefensivePlayType(**payload)
+                session.add(existing)
+                existing_records[record_key] = existing
             else:
                 for field, value in payload.items():
                     setattr(existing, field, value)
@@ -313,7 +332,8 @@ def parse_lineup_player_ids(lineup_key: str) -> list[int]:
     if not lineup_key:
         return []
 
-    candidate_parts = [part.strip() for part in str(lineup_key).split("-")]
+    normalized_key = str(lineup_key).strip().strip("-")
+    candidate_parts = [part.strip() for part in normalized_key.split("-") if part.strip()]
     if not candidate_parts:
         return []
 
@@ -365,8 +385,9 @@ def _fetch_dataframe(
 
     for attempt in range(1, config.max_retries + 1):
         try:
-            endpoint = endpoint_factory(**endpoint_kwargs)
-            df = endpoint.get_data_frames()[0]
+            with _temporary_proxy_override(config.disable_env_proxies):
+                endpoint = endpoint_factory(**endpoint_kwargs)
+                df = endpoint.get_data_frames()[0]
             raw_path = save_raw_frame(df, endpoint_name, config, metadata=endpoint_kwargs)
             LOGGER.info("Saved raw %s snapshot to %s", endpoint_name, raw_path)
             time.sleep(config.sleep_seconds)
@@ -397,6 +418,69 @@ def _derive_opponent_ppp(defensive_rating: float | None) -> float | None:
     if defensive_rating is None:
         return None
     return defensive_rating / 100.0
+
+
+def _normalize_play_type_label(play_type: str) -> str:
+    """Normalize API play-type labels into stable feature/database names."""
+    normalized = str(play_type).strip()
+    mapping = {
+        "PRBallHandler": "Pick and Roll Ball Handler",
+        "PRRollMan": "Pick and Roll Roll Man",
+        "PRRollman": "Pick and Roll Roll Man",
+        "Spotup": "Spot Up",
+    }
+    return mapping.get(normalized, normalized)
+
+
+@contextmanager
+def _temporary_proxy_override(disable_env_proxies: bool):
+    """
+    Temporarily remove broken shell-level proxy variables for nba_api requests.
+
+    This repo environment may define dead local proxy values such as
+    `HTTP_PROXY=http://127.0.0.1:9`, which causes requests to fail before
+    reaching stats.nba.com even though the same code works elsewhere.
+    """
+    if not disable_env_proxies:
+        yield
+        return
+
+    proxy_keys = [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+    ]
+    original_values = {key: os.environ.get(key) for key in proxy_keys}
+    original_no_proxy = os.environ.get("NO_PROXY")
+    original_no_proxy_lower = os.environ.get("no_proxy")
+
+    try:
+        for key in proxy_keys:
+            os.environ.pop(key, None)
+
+        no_proxy_hosts = "stats.nba.com,cdn.nba.com,ak-static.cms.nba.com,localhost,127.0.0.1,::1"
+        os.environ["NO_PROXY"] = no_proxy_hosts
+        os.environ["no_proxy"] = no_proxy_hosts
+        yield
+    finally:
+        for key, value in original_values.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+        if original_no_proxy is None:
+            os.environ.pop("NO_PROXY", None)
+        else:
+            os.environ["NO_PROXY"] = original_no_proxy
+
+        if original_no_proxy_lower is None:
+            os.environ.pop("no_proxy", None)
+        else:
+            os.environ["no_proxy"] = original_no_proxy_lower
 
 
 def _safe_float(value) -> float | None:

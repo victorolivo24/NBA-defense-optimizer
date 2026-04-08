@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pandas as pd
@@ -5,6 +6,7 @@ import pandas as pd
 from src.database.connection import create_session_factory, initialize_database
 from src.database.ingest import (
     IngestConfig,
+    _temporary_proxy_override,
     normalize_lineup_records,
     parse_lineup_player_ids,
     save_raw_frame,
@@ -17,6 +19,12 @@ from src.database.schema import DefensivePlayType, LineupMetric, LineupPlayer, P
 
 def test_parse_lineup_player_ids_returns_five_ids():
     player_ids = parse_lineup_player_ids("201939-202691-203110-203952-1626172")
+
+    assert player_ids == [201939, 202691, 203110, 203952, 1626172]
+
+
+def test_parse_lineup_player_ids_handles_live_endpoint_hyphen_wrapping():
+    player_ids = parse_lineup_player_ids("-201939-202691-203110-203952-1626172-")
 
     assert player_ids == [201939, 202691, 203110, 203952, 1626172]
 
@@ -56,6 +64,22 @@ def test_save_raw_frame_writes_snapshot(tmp_path: Path):
     assert output_path.suffix == ".json"
     assert "player_defense" in str(output_path)
     assert "2024-25" in str(output_path)
+
+
+def test_temporary_proxy_override_clears_and_restores_proxy_environment():
+    os.environ["HTTP_PROXY"] = "http://127.0.0.1:9"
+    os.environ["HTTPS_PROXY"] = "http://127.0.0.1:9"
+    os.environ["ALL_PROXY"] = "http://127.0.0.1:9"
+
+    with _temporary_proxy_override(True):
+        assert os.environ.get("HTTP_PROXY") is None
+        assert os.environ.get("HTTPS_PROXY") is None
+        assert os.environ.get("ALL_PROXY") is None
+        assert "stats.nba.com" in os.environ["NO_PROXY"]
+
+    assert os.environ["HTTP_PROXY"] == "http://127.0.0.1:9"
+    assert os.environ["HTTPS_PROXY"] == "http://127.0.0.1:9"
+    assert os.environ["ALL_PROXY"] == "http://127.0.0.1:9"
 
 
 def test_database_upserts_persist_players_play_types_and_lineups(tmp_path: Path):

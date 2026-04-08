@@ -28,10 +28,14 @@ NBA-defense-optimizer/
 │   │   ├── connection.py
 │   │   ├── ingest.py
 │   │   └── schema.py
+│   ├── features/
+│   │   ├── __init__.py
+│   │   └── lineup_dataset.py
 │   └── models/
 │       ├── __init__.py
 │       ├── base.py
 │       └── scheme_recommender.py
+├── build_features.py
 ├── ingest.py
 ├── project-proposal.txt
 └── requirements.txt
@@ -97,7 +101,19 @@ This is intentionally modular:
 - `XGBoostSchemeRecommender` is a placeholder implementation target for the first real model.
 - You can later swap XGBoost for Random Forest, LightGBM, or a custom ensemble without rewriting the database or ingestion code.
 
-### 4. Dependency list
+### 4. Feature engineering layer
+
+Phase 2 adds a dedicated feature pipeline in [src/features/lineup_dataset.py](/c:/Users/victo/Downloads/cs210/NBA-defense-optimizer/src/features/lineup_dataset.py).
+
+This layer:
+
+- Joins lineup records to the five linked players.
+- Pulls each player's defensive play-type profile.
+- Aggregates lineup-level features such as position counts, average size, and play-type PPP summaries.
+- Produces model-ready rows with targets like `defensive_rating_target` and `opponent_ppp_target`.
+- Exports the dataset to CSV through [build_features.py](/c:/Users/victo/Downloads/cs210/NBA-defense-optimizer/build_features.py).
+
+### 5. Dependency list
 
 [requirements.txt](/c:/Users/victo/Downloads/cs210/NBA-defense-optimizer/requirements.txt) includes the core libraries you requested:
 
@@ -124,16 +140,32 @@ Phase 1 deliverables now implemented:
 3. Five-man lineup ingestion support.
 4. Automated tests for parsing, raw persistence, and SQL upserts.
 
+## Phase 2 Status
+
+Phase 2 is the feature engineering phase. The implementation goal is:
+
+1. Join player, play-type, and lineup tables into a single training dataset.
+2. Aggregate five-man lineup features that a model can consume directly.
+3. Keep the feature layer separate from the model so the modeling logic stays swappable.
+4. Test the generated dataset before starting model training.
+
+Phase 2 deliverables now implemented:
+
+1. A dedicated feature package under `src/features/`.
+2. A lineup dataset builder that produces model-ready Pandas rows.
+3. A CSV export entry point for offline training workflows.
+4. Automated tests for lineup feature aggregation and dataset export.
+
 ## Current Plan
 
-After Phase 1, the next implementation steps should be:
+After Phase 2, the next implementation steps should be:
 
 1. Expand ingestion to collect stable historical windows instead of a single snapshot.
-2. Build a feature engineering module that aggregates the five linked players' defensive play-type profiles.
-3. Add any missing context tables needed for matchup or game-window features.
-4. Define a target variable for scheme recommendation.
-5. Train a baseline `XGBoost` regressor or classifier.
-6. Add SHAP-based explanation outputs for coach-readable recommendations.
+2. Add any missing context tables needed for matchup or game-window features.
+3. Define a target variable for scheme recommendation.
+4. Train a baseline `XGBoost` regressor or classifier.
+5. Add SHAP-based explanation outputs for coach-readable recommendations.
+6. Package a recommendation interface for course demos.
 
 ## How To Run
 
@@ -165,6 +197,12 @@ Run the Phase 1 test suite with:
 
 ```bash
 pytest
+```
+
+Build the Phase 2 training dataset with:
+
+```bash
+python build_features.py
 ```
 
 ## Notes On Data Quality

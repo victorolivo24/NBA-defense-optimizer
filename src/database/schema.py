@@ -69,7 +69,7 @@ class DefensivePlayType(Base):
 
 
 class LineupMetric(Base):
-    """Lineup-level outcomes and scheme metadata."""
+    """Lineup-level outcomes and optional scheme metadata."""
 
     __tablename__ = "lineup_metrics"
     __table_args__ = (

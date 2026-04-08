@@ -1,4 +1,4 @@
-"""Abstract model interface for defensive scheme recommendation."""
+"""Abstract model interface for lineup defensive outcome modeling."""
 
 from __future__ import annotations
 

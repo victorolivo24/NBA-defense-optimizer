@@ -1,4 +1,4 @@
-"""CLI entry point for Phase 4 scheme recommendation."""
+"""CLI entry point for Phase 4 scheme simulation and recommendation."""
 
 from src.database.connection import DEFAULT_DATABASE_URL, create_session_factory
 from src.features import build_training_dataset

@@ -1,10 +1,10 @@
 # Dynamic Lineup-Dependent Defensive Scheme Optimizer
 
-Starter boilerplate for a Rutgers Data Science project that recommends the best NBA defensive scheme for a live five-man lineup using lineup context, defensive play-type data, and a swappable modeling layer.
+Starter boilerplate for a Rutgers Data Science project that builds a lineup-aware defensive scheme simulator and recommendation engine using lineup context, defensive play-type data, and a swappable modeling layer.
 
 ## Project Goal
 
-This project aims to move from descriptive NBA analytics to prescriptive decision support. Given a five-man lineup and a defensive objective, the system will aggregate player-level defensive tendencies, lineup-level performance, and matchup context to recommend a scheme such as `Drop`, `Switch`, or `Zone`.
+This project aims to move from descriptive NBA analytics to prescriptive decision support. Given a five-man lineup and a defensive objective, the system will aggregate player-level defensive tendencies, lineup-level performance, and matchup context to simulate how a scheme such as `Drop`, `Switch`, or `Zone` may perform, then rank the available options.
 
 The initial scaffold in this repository is designed to support that workflow end to end:
 
@@ -55,7 +55,7 @@ It includes:
 
 - A `Player` table for core player identity fields.
 - A `DefensivePlayType` table for player-level defensive PPP allowed by play type.
-- A `LineupMetric` table for lineup-level defensive performance and scheme labels.
+- A `LineupMetric` table for lineup-level defensive performance and optional scheme metadata.
 - A `LineupPlayer` association table that maps a lineup to its five players.
 
 Why this shape:
@@ -102,7 +102,7 @@ The model scaffold lives in `src/models/base.py` and `src/models/scheme_recommen
 This is intentionally modular:
 
 - `BaseSchemeModel` defines a small interface for training, prediction, and feature importance.
-- `XGBoostSchemeRecommender` is a placeholder implementation target for the first real model.
+- `XGBoostSchemeRecommender` is the current baseline lineup outcome model.
 - You can later swap XGBoost for Random Forest, LightGBM, or a custom ensemble without rewriting the database or ingestion code.
 
 ### 4. Feature engineering layer
@@ -165,7 +165,7 @@ Phase 2 deliverables now implemented:
 Phase 3 is the baseline target-definition and model-training phase. The implementation goal is:
 
 1. Decide on a target the model can learn from with the currently available data.
-2. Keep that target definition explicit so it can be replaced later with real scheme labels.
+2. Keep that target definition explicit so it can be replaced later with true scheme-aware supervision.
 3. Train and evaluate a baseline model on the engineered lineup dataset.
 4. Test the training pipeline before moving into recommendation logic.
 
@@ -183,7 +183,7 @@ Current target note:
 - Phase 3 therefore uses lineup defensive outcome targets as a surrogate learning problem.
 - The default baseline target is `defensive_rating_target`.
 - When the live lineup endpoint does not expose a direct defensive rating, the ingestion layer derives a fallback target from opponent points allowed per 48 minutes.
-- This is not the final scheme recommendation target; it is the first defensible supervised training step.
+- This is not a direct scheme classifier; it is the first defensible supervised training step for the simulator.
 
 Live NBA API validation note:
 
@@ -193,7 +193,7 @@ Live NBA API validation note:
 
 ## Phase 4 Status
 
-Phase 4 is the recommendation and explanation phase. The implementation goal is:
+Phase 4 is the simulation, recommendation, and explanation phase. The implementation goal is:
 
 1. Score candidate defensive schemes for a lineup using the baseline model.
 2. Keep scheme logic explicit and editable while true scheme labels are still unavailable.
@@ -203,16 +203,16 @@ Phase 4 is the recommendation and explanation phase. The implementation goal is:
 Phase 4 deliverables now implemented:
 
 1. A recommendation layer in `src/models/recommendation.py`.
-2. Explicit candidate scheme profiles for `Drop`, `Switch`, and `Zone`.
+2. Explicit simulator profiles for `Drop`, `Switch`, and `Zone`.
 3. SHAP-backed explanation support through the trained XGBoost model.
 4. A CLI entry point in `recommend_scheme.py`.
 5. Automated tests for scheme adjustment and recommendation ranking.
 
 Phase 4 limitation:
 
-- The recommendation engine currently applies explicit feature adjustments for each scheme and scores the adjusted lineup with the baseline outcome model.
-- This is a practical bridge to a recommendation system, but it is still a proxy for true historical scheme outcome modeling.
-- Once you have scheme-aware labels or possession-level scheme tagging, these profiles should be replaced by learned scheme-specific training targets.
+- The recommendation engine currently applies explicit feature adjustments for each scheme profile and scores the adjusted lineup with the baseline outcome model.
+- This is a practical simulation-and-recommendation workflow built on real data, but it is still a proxy for true historical scheme outcome modeling.
+- Once you have scheme-aware labels or possession-level scheme tagging, these simulator profiles should be replaced by learned scheme-specific training targets.
 
 ## Current Plan
 
@@ -220,7 +220,7 @@ After Phase 4, the next implementation steps should be:
 
 1. Expand ingestion to collect stable historical windows instead of a single snapshot.
 2. Add any missing context tables needed for matchup or game-window features.
-3. Replace heuristic scheme profiles with scheme-aware training data.
+3. Replace heuristic simulator profiles with scheme-aware training data.
 4. Add richer context such as coaching directives, opponent archetypes, and game state.
 5. Package a recommendation interface for course demos.
 6. Add persistence for recommendation runs and explanations.
@@ -263,13 +263,13 @@ Build the Phase 2 training dataset with:
 python build_features.py
 ```
 
-Train the Phase 3 baseline model with:
+Train the Phase 3 baseline lineup outcome model with:
 
 ```bash
 python train_model.py
 ```
 
-Generate a Phase 4 recommendation with:
+Generate a Phase 4 simulated scheme recommendation with:
 
 ```bash
 python recommend_scheme.py
@@ -290,4 +290,16 @@ The scaffold reflects the project proposal in `project-proposal.txt`:
 - API-based data acquisition and Pandas transformation.
 - A tree-based modeling path using XGBoost.
 - Explainability support through SHAP.
-- A modular pipeline that can evolve from a class project scaffold into a full recommendation engine.
+- A modular pipeline that can evolve from a class project scaffold into a full simulation and recommendation engine.
+
+## Positioning Note
+
+This repository should be described as a lineup-aware defensive scheme simulator and recommendation engine, not as a supervised defensive scheme classifier.
+
+Why:
+
+- The public NBA stats API exposes lineup outcomes and aggregated defensive play-type data.
+- It does not expose possession-level labels that say a defense was in `Drop`, `Switch`, or `Zone` on a given play.
+- The current model therefore learns lineup defensive outcomes from real data, then the simulator layer applies explicit scheme profiles to estimate how different coverages may perform.
+
+That framing is both accurate and defendable for a course project.

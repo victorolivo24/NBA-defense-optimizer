@@ -1,4 +1,4 @@
-"""Placeholder XGBoost model implementation."""
+"""Baseline XGBoost lineup outcome model implementation."""
 
 from __future__ import annotations
 
@@ -11,12 +11,12 @@ from .base import BaseSchemeModel
 
 class XGBoostSchemeRecommender(BaseSchemeModel):
     """
-    Baseline regressor placeholder for defensive rating prediction.
+    Baseline regressor for lineup defensive outcome prediction.
 
     This can later be replaced with:
-    - a classifier over scheme labels
     - one model per scheme with expected points saved outputs
     - a ranking model over candidate defensive coverages
+    - a scheme-aware model once true scheme supervision exists
     """
 
     def __init__(self) -> None:

@@ -64,19 +64,28 @@ Important note:
 
 The ingestion logic lives in [src/database/ingest.py](/c:/Users/victo/Downloads/cs210/NBA-defense-optimizer/src/database/ingest.py), with a thin CLI entry point in [ingest.py](/c:/Users/victo/Downloads/cs210/NBA-defense-optimizer/ingest.py).
 
-This starter script:
+Phase 1 now includes:
 
 - Creates the SQLite database.
 - Fetches basic player defensive stats from `nba_api`.
-- Attempts to fetch defensive play-type data.
+- Fetches defensive play-type data.
+- Fetches five-man lineup defensive data.
+- Saves raw endpoint snapshots to `data/raw/<season>/<endpoint>/`.
 - Normalizes the raw responses into Pandas DataFrames.
 - Upserts data into the SQLAlchemy models.
+- Retries unstable API requests with backoff.
 
 Rate-limit warning:
 
 - The NBA stats endpoints are sensitive to rapid repeated requests.
 - The scaffold intentionally includes `time.sleep()` between API calls.
 - Do not remove those delays unless you replace them with a more robust retry and backoff strategy.
+
+Raw snapshot rationale:
+
+- API payloads are saved before further transformation.
+- This gives you reproducibility when an endpoint changes later.
+- It also makes debugging easier when a downstream normalization step breaks.
 
 ### 3. Model layer placeholder
 
@@ -99,13 +108,29 @@ This is intentionally modular:
 - `shap`
 - `scikit-learn`
 
+## Phase 1 Status
+
+Phase 1 is the data-ingestion hardening phase. The implementation goal is:
+
+1. Pull player defense, defensive play-type, and lineup defense data.
+2. Save raw snapshots locally for reproducibility.
+3. Load normalized records into SQLite.
+4. Test ingestion helpers and database writes before moving to feature engineering.
+
+Phase 1 deliverables now implemented:
+
+1. Retry and backoff aware endpoint fetch logic.
+2. Raw JSON persistence under `data/raw/`.
+3. Five-man lineup ingestion support.
+4. Automated tests for parsing, raw persistence, and SQL upserts.
+
 ## Current Plan
 
-This scaffold is the starting point. The next implementation steps should be:
+After Phase 1, the next implementation steps should be:
 
 1. Expand ingestion to collect stable historical windows instead of a single snapshot.
-2. Add lineup source tables or a lineup ingestion step from NBA lineup endpoints.
-3. Engineer lineup features by aggregating the five linked players' defensive play-type profiles.
+2. Build a feature engineering module that aggregates the five linked players' defensive play-type profiles.
+3. Add any missing context tables needed for matchup or game-window features.
 4. Define a target variable for scheme recommendation.
 5. Train a baseline `XGBoost` regressor or classifier.
 6. Add SHAP-based explanation outputs for coach-readable recommendations.
@@ -130,11 +155,24 @@ By default, the script writes to:
 data/processed/nba_defense.sqlite
 ```
 
+Raw API snapshots are written under:
+
+```text
+data/raw/<season>/<endpoint>/
+```
+
+Run the Phase 1 test suite with:
+
+```bash
+pytest
+```
+
 ## Notes On Data Quality
 
 - Some `nba_api` endpoints change behavior without warning.
 - Some defensive play-type endpoints are sparse or season-dependent.
-- You should expect to harden the ingestion layer with retries, logging, and checkpointing once you begin full data collection.
+- You should expect to keep refining retries, logging, and checkpointing as you begin full data collection.
+- Some lineup endpoint fields vary slightly by season, so normalization helpers should stay defensive.
 
 ## Proposal Alignment
 

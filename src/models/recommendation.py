@@ -32,7 +32,7 @@ def recommend_scheme(
         _ensure_targets_exist(lineup_frame),
         target_column=artifacts.target_column,
     )
-    base_features = base_features[artifacts.feature_columns]
+    base_features = base_features.reindex(columns=artifacts.feature_columns, fill_value=0.0)
 
     scored_rows = []
     explanation_rows = []
@@ -62,18 +62,20 @@ def recommend_scheme(
 
     if hasattr(artifacts.model, "explain"):
         shap_frame = artifacts.model.explain(base_features)
-        shap_long = (
-            shap_frame.iloc[[0]]
-            .T.reset_index()
-            .rename(columns={"index": "feature", 0: "baseline_shap_value"})
-            .sort_values("baseline_shap_value", key=lambda col: col.abs(), ascending=False)
-        )
-        explanation = explanation.merge(shap_long, on="feature", how="left")
-        explanation = explanation.sort_values(
-            ["scheme", "baseline_shap_value"],
-            key=lambda col: col.abs() if col.name == "baseline_shap_value" else col,
-            ascending=[True, False],
-        )
+        shap_long = shap_frame.iloc[[0]].T.reset_index()
+        if len(shap_long.columns) >= 2:
+            shap_long.columns = ["feature", "baseline_shap_value"]
+            shap_long = shap_long.sort_values(
+                "baseline_shap_value",
+                key=lambda col: col.abs(),
+                ascending=False,
+            )
+            explanation = explanation.merge(shap_long, on="feature", how="left")
+            explanation = explanation.sort_values(
+                ["scheme", "baseline_shap_value"],
+                key=lambda col: col.abs() if col.name == "baseline_shap_value" else col,
+                ascending=[True, False],
+            )
 
     best = ranked.iloc[0]
     return SchemeRecommendation(
@@ -103,6 +105,16 @@ def _ensure_targets_exist(lineup_frame: pd.DataFrame) -> pd.DataFrame:
     frame = lineup_frame.copy()
     if "defensive_rating_target" not in frame.columns:
         frame["defensive_rating_target"] = 0.0
+    else:
+        frame["defensive_rating_target"] = pd.to_numeric(
+            frame["defensive_rating_target"],
+            errors="coerce",
+        ).fillna(0.0)
     if "opponent_ppp_target" not in frame.columns:
         frame["opponent_ppp_target"] = 0.0
+    else:
+        frame["opponent_ppp_target"] = pd.to_numeric(
+            frame["opponent_ppp_target"],
+            errors="coerce",
+        ).fillna(0.0)
     return frame

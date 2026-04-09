@@ -1,0 +1,294 @@
+"""Helpers for running a presentation-friendly scheme recommendation demo."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+import re
+
+import pandas as pd
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
+
+from src.database.connection import DEFAULT_DATABASE_URL, create_session_factory
+from src.database.schema import Player
+from src.features import build_synthetic_lineup_row, build_training_dataset
+from src.models import (
+    DEFAULT_TARGET_COLUMN,
+    SchemeRecommendation,
+    prepare_training_matrices,
+    recommend_scheme,
+    train_baseline_regressor,
+)
+from src.models.training import TrainingArtifacts
+
+
+CASE_STUDY_LABELS = (
+    ("Most Used Lineup", "minutes_played", True),
+    ("Best Actual Defense", "defensive_rating_target", False),
+    ("Worst Actual Defense", "defensive_rating_target", True),
+    ("Best Isolation Defense", "isolation_ppp_mean", False),
+)
+
+
+@dataclass
+class DemoResult:
+    """Presentation-friendly recommendation output for one lineup."""
+
+    case_label: str
+    lineup_key: str
+    lineup_name: str
+    team_abbreviation: str | None
+    minutes_played: float | None
+    actual_target: float | None
+    baseline_prediction: float
+    recommendation: SchemeRecommendation
+
+
+def train_demo_artifacts(
+    season: str = "2024-25",
+    database_url: str = DEFAULT_DATABASE_URL,
+    target_column: str = DEFAULT_TARGET_COLUMN,
+    min_minutes: float = 0.0,
+) -> tuple[pd.DataFrame, TrainingArtifacts]:
+    """Load the engineered lineup dataset and fit the baseline model for demo use."""
+    session_factory = create_session_factory(database_url)
+    dataset = build_training_dataset(
+        session_factory=session_factory,
+        season=season,
+        min_minutes=min_minutes,
+    )
+    artifacts = train_baseline_regressor(dataset=dataset, target_column=target_column)
+    return dataset, artifacts
+
+
+def load_players_for_demo(
+    player_names: list[str],
+    *,
+    season: str,
+    database_url: str = DEFAULT_DATABASE_URL,
+) -> list[Player]:
+    """Resolve exactly five user-supplied player names from the database."""
+    if len(player_names) != 5:
+        raise ValueError("Please supply exactly 5 player names.")
+
+    session_factory = create_session_factory(database_url)
+    session = session_factory()
+    try:
+        players = (
+            session.execute(select(Player).options(selectinload(Player.defensive_play_types)))
+            .scalars()
+            .all()
+        )
+        resolved = [_resolve_player_name(name, players) for name in player_names]
+
+        duplicate_ids = {player.nba_player_id for player in resolved}
+        if len(duplicate_ids) != len(resolved):
+            raise ValueError("Player input contains duplicates. Please supply 5 distinct players.")
+
+        missing_play_types = [
+            player.full_name
+            for player in resolved
+            if not any(metric.season == season for metric in player.defensive_play_types)
+        ]
+        if missing_play_types:
+            joined = ", ".join(missing_play_types)
+            raise ValueError(f"Missing defensive play-type data for season {season}: {joined}")
+
+        return resolved
+    finally:
+        session.close()
+
+
+def make_custom_lineup_demo_frame(
+    player_names: list[str],
+    *,
+    season: str,
+    database_url: str = DEFAULT_DATABASE_URL,
+) -> pd.DataFrame:
+    """Build a one-row demo dataset from five user-specified players."""
+    players = load_players_for_demo(player_names, season=season, database_url=database_url)
+    row = build_synthetic_lineup_row(players, season=season)
+    frame = pd.DataFrame([row])
+    frame["case_label"] = "Custom Lineup"
+    return frame
+
+
+def select_lineups(
+    dataset: pd.DataFrame,
+    *,
+    lineup_key: str | None = None,
+    team: str | None = None,
+    search: str | None = None,
+    min_minutes: float = 0.0,
+    limit: int = 5,
+) -> pd.DataFrame:
+    """Filter the engineered dataset down to the lineups a user wants to demo."""
+    filtered = dataset.copy()
+
+    if min_minutes > 0:
+        filtered = filtered[filtered["minutes_played"].fillna(0) >= min_minutes]
+
+    if lineup_key:
+        filtered = filtered[filtered["lineup_key"] == lineup_key]
+
+    if team:
+        filtered = filtered[
+            filtered["team_abbreviation"].fillna("").str.upper() == team.strip().upper()
+        ]
+
+    if search:
+        needle = search.strip().casefold()
+        filtered = filtered[
+            filtered["lineup_name"].fillna("").str.casefold().str.contains(needle, regex=False)
+        ]
+
+    return filtered.sort_values("minutes_played", ascending=False).head(limit).reset_index(drop=True)
+
+
+def build_default_case_studies(dataset: pd.DataFrame, min_minutes: float = 10.0) -> pd.DataFrame:
+    """Pick a handful of interesting lineups so the demo works without manual input."""
+    eligible = dataset[dataset["minutes_played"].fillna(0) >= min_minutes].copy()
+    if eligible.empty:
+        eligible = dataset.copy()
+
+    cases: list[pd.Series] = []
+    used_keys: set[str] = set()
+
+    for label, metric, descending in CASE_STUDY_LABELS:
+        candidates = eligible.dropna(subset=[metric]).sort_values(metric, ascending=not descending)
+        candidates = candidates[~candidates["lineup_key"].isin(used_keys)]
+        if candidates.empty:
+            continue
+
+        selected = candidates.iloc[0].copy()
+        selected["case_label"] = label
+        cases.append(selected)
+        used_keys.add(str(selected["lineup_key"]))
+
+    if not cases and not dataset.empty:
+        fallback = dataset.iloc[0].copy()
+        fallback["case_label"] = "Sample Lineup"
+        cases.append(fallback)
+
+    return pd.DataFrame(cases).reset_index(drop=True)
+
+
+def run_demo_for_lineups(
+    lineups: pd.DataFrame,
+    artifacts: TrainingArtifacts,
+    *,
+    case_label_column: str | None = None,
+) -> list[DemoResult]:
+    """Run recommendations for one or more selected lineup rows."""
+    results: list[DemoResult] = []
+    for index, (_, lineup_row) in enumerate(lineups.iterrows(), start=1):
+        recommendation = recommend_scheme(lineup_row, artifacts)
+        baseline_prediction = _predict_baseline(lineup_row, artifacts)
+        case_label = (
+            str(lineup_row[case_label_column])
+            if case_label_column and case_label_column in lineup_row
+            else f"Lineup {index}"
+        )
+        results.append(
+            DemoResult(
+                case_label=case_label,
+                lineup_key=str(lineup_row["lineup_key"]),
+                lineup_name=str(lineup_row.get("lineup_name") or lineup_row["lineup_key"]),
+                team_abbreviation=_optional_str(lineup_row.get("team_abbreviation")),
+                minutes_played=_optional_float(lineup_row.get("minutes_played")),
+                actual_target=_optional_float(lineup_row.get(artifacts.target_column)),
+                baseline_prediction=baseline_prediction,
+                recommendation=recommendation,
+            )
+        )
+
+    return results
+
+
+def format_demo_result(result: DemoResult, top_explanations: int = 5) -> str:
+    """Format one demo result as presentation-friendly plain text."""
+    lines = [
+        f"{result.case_label}",
+        f"Lineup: {result.lineup_name}",
+    ]
+
+    meta = []
+    if result.team_abbreviation:
+        meta.append(f"Team: {result.team_abbreviation}")
+    if result.minutes_played is not None:
+        meta.append(f"Minutes: {result.minutes_played:.1f}")
+    if result.actual_target is not None:
+        meta.append(f"Actual target: {result.actual_target:.2f}")
+    meta.append(f"Baseline prediction: {result.baseline_prediction:.2f}")
+    lines.append(" | ".join(meta))
+    lines.append(f"Recommended scheme: {result.recommendation.recommended_scheme}")
+    lines.append("Scheme ranking:")
+    lines.append(result.recommendation.ranked_schemes.to_string(index=False))
+
+    explanation = result.recommendation.explanation.head(top_explanations)
+    if not explanation.empty:
+        lines.append("Top explanation rows:")
+        lines.append(explanation.to_string(index=False))
+
+    return "\n".join(lines)
+
+
+def _predict_baseline(lineup_row: pd.Series, artifacts: TrainingArtifacts) -> float:
+    lineup_frame = lineup_row.to_frame().T
+    if artifacts.target_column not in lineup_frame.columns:
+        lineup_frame[artifacts.target_column] = 0.0
+    else:
+        lineup_frame[artifacts.target_column] = pd.to_numeric(
+            lineup_frame[artifacts.target_column],
+            errors="coerce",
+        ).fillna(0.0)
+    other_target = "opponent_ppp_target" if artifacts.target_column == "defensive_rating_target" else "defensive_rating_target"
+    if other_target not in lineup_frame.columns:
+        lineup_frame[other_target] = 0.0
+    else:
+        lineup_frame[other_target] = pd.to_numeric(
+            lineup_frame[other_target],
+            errors="coerce",
+        ).fillna(0.0)
+    features, _ = prepare_training_matrices(lineup_frame, target_column=artifacts.target_column)
+    features = features.reindex(columns=artifacts.feature_columns, fill_value=0.0)
+    return float(artifacts.model.predict(features)[0])
+
+
+def _optional_float(value: object) -> float | None:
+    if value is None or pd.isna(value):
+        return None
+    return float(value)
+
+
+def _optional_str(value: object) -> str | None:
+    if value is None or pd.isna(value):
+        return None
+    return str(value)
+
+
+def _resolve_player_name(name: str, players: list[Player]) -> Player:
+    needle = _normalize_name(name)
+
+    exact_matches = [player for player in players if _normalize_name(player.full_name) == needle]
+    if len(exact_matches) == 1:
+        return exact_matches[0]
+    if len(exact_matches) > 1:
+        raise ValueError(_format_ambiguity_message(name, exact_matches))
+
+    partial_matches = [player for player in players if needle in _normalize_name(player.full_name)]
+    if len(partial_matches) == 1:
+        return partial_matches[0]
+    if len(partial_matches) > 1:
+        raise ValueError(_format_ambiguity_message(name, partial_matches))
+
+    raise ValueError(f"Could not find a player matching '{name}'.")
+
+
+def _format_ambiguity_message(name: str, matches: list[Player]) -> str:
+    options = ", ".join(sorted(player.full_name for player in matches[:5]))
+    return f"Player name '{name}' is ambiguous. Try one of: {options}"
+
+
+def _normalize_name(name: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", name.casefold())

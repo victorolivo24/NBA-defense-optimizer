@@ -7,7 +7,9 @@ from sqlalchemy.orm import sessionmaker
 
 from .schema import Base
 
-DEFAULT_DATABASE_URL = "sqlite:///data/processed/nba_defense.sqlite"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_DATABASE_PATH = REPO_ROOT / "data" / "processed" / "nba_defense.sqlite"
+DEFAULT_DATABASE_URL = f"sqlite:///{DEFAULT_DATABASE_PATH.as_posix()}"
 
 
 def create_session_factory(database_url: str = DEFAULT_DATABASE_URL) -> sessionmaker:

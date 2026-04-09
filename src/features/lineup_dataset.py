@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from src.database.connection import DEFAULT_DATABASE_URL, create_session_factory
-from src.database.schema import LineupMetric, LineupPlayer, Player
+from src.database.schema import DefensivePlayType, LineupMetric, LineupPlayer, Player
 
 DEFAULT_PLAY_TYPES = [
     "Isolation",
@@ -73,26 +73,87 @@ def export_training_dataset(
     return path
 
 
+def build_synthetic_lineup_row(
+    players: list[Player],
+    *,
+    season: str,
+    play_types: list[str] | None = None,
+    lineup_key: str | None = None,
+    lineup_name: str | None = None,
+    team_abbreviation: str | None = None,
+) -> dict[str, float | int | str | None]:
+    """Build one model-ready row for a user-specified five-player lineup."""
+    play_types = play_types or DEFAULT_PLAY_TYPES
+    if len(players) != 5:
+        raise ValueError("A synthetic lineup row requires exactly 5 players.")
+
+    resolved_team = team_abbreviation or _resolve_team_abbreviation(players)
+    resolved_name = lineup_name or " - ".join(player.full_name for player in players)
+    resolved_key = lineup_key or "custom:" + "|".join(str(player.nba_player_id) for player in players)
+
+    return _build_player_feature_row(
+        players,
+        play_types=play_types,
+        season=season,
+        lineup_id=None,
+        lineup_key=resolved_key,
+        lineup_name=resolved_name,
+        team_abbreviation=resolved_team,
+        minutes_played=None,
+        possessions=None,
+        defensive_rating=None,
+        opponent_ppp=None,
+    )
+
+
 def _build_lineup_feature_row(lineup: LineupMetric, play_types: list[str]) -> dict[str, float | int | str | None]:
     links = sorted(lineup.players, key=lambda link: link.slot)
     players = [link.player for link in links if link.player is not None]
+    return _build_player_feature_row(
+        players,
+        play_types=play_types,
+        season=lineup.season,
+        lineup_id=lineup.id,
+        lineup_key=lineup.lineup_key,
+        lineup_name=lineup.lineup_name,
+        team_abbreviation=lineup.team_abbreviation,
+        minutes_played=lineup.minutes_played,
+        possessions=lineup.possessions,
+        defensive_rating=lineup.defensive_rating,
+        opponent_ppp=lineup.opponent_ppp,
+    )
 
+
+def _build_player_feature_row(
+    players: list[Player],
+    *,
+    play_types: list[str],
+    season: str,
+    lineup_id: int | None,
+    lineup_key: str,
+    lineup_name: str | None,
+    team_abbreviation: str | None,
+    minutes_played: float | None,
+    possessions: float | None,
+    defensive_rating: float | None,
+    opponent_ppp: float | None,
+) -> dict[str, float | int | str | None]:
     row: dict[str, float | int | str | None] = {
-        "lineup_id": lineup.id,
-        "lineup_key": lineup.lineup_key,
-        "lineup_name": lineup.lineup_name,
-        "season": lineup.season,
-        "team_abbreviation": lineup.team_abbreviation,
-        "minutes_played": lineup.minutes_played,
-        "possessions": lineup.possessions,
+        "lineup_id": lineup_id,
+        "lineup_key": lineup_key,
+        "lineup_name": lineup_name,
+        "season": season,
+        "team_abbreviation": team_abbreviation,
+        "minutes_played": minutes_played,
+        "possessions": possessions,
         "lineup_size": len(players),
         "guard_count": _count_positions(players, "G"),
         "forward_count": _count_positions(players, "F"),
         "center_count": _count_positions(players, "C"),
         "avg_height_inches": _mean([_height_to_inches(player.height) for player in players]),
         "avg_weight": _mean([player.weight for player in players]),
-        "defensive_rating_target": lineup.defensive_rating,
-        "opponent_ppp_target": lineup.opponent_ppp,
+        "defensive_rating_target": defensive_rating,
+        "opponent_ppp_target": opponent_ppp,
     }
 
     for play_type in play_types:
@@ -102,10 +163,7 @@ def _build_lineup_feature_row(lineup: LineupMetric, play_types: list[str]) -> di
         percentile_values = []
 
         for player in players:
-            match = next(
-                (metric for metric in player.defensive_play_types if metric.play_type == play_type),
-                None,
-            )
+            match = _find_play_type_metric(player.defensive_play_types, play_type=play_type, season=season)
             if match is None:
                 continue
             ppp_values.append(match.ppp_allowed)
@@ -121,6 +179,18 @@ def _build_lineup_feature_row(lineup: LineupMetric, play_types: list[str]) -> di
         row[f"{normalized_name}_percentile_min"] = _min(percentile_values)
 
     return row
+
+
+def _find_play_type_metric(
+    metrics: list[DefensivePlayType],
+    *,
+    play_type: str,
+    season: str,
+) -> DefensivePlayType | None:
+    return next(
+        (metric for metric in metrics if metric.play_type == play_type and metric.season == season),
+        None,
+    )
 
 
 def _count_positions(players: list[Player], token: str) -> int:
@@ -148,6 +218,15 @@ def _normalize_play_type_name(play_type: str) -> str:
         .strip()
         .replace(" ", "_")
     )
+
+
+def _resolve_team_abbreviation(players: list[Player]) -> str | None:
+    teams = {player.team_abbreviation for player in players if player.team_abbreviation}
+    if len(teams) == 1:
+        return next(iter(teams))
+    if not teams:
+        return None
+    return "MIX"
 
 
 def _mean(values: list[float | int | None]) -> float | None:

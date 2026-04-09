@@ -275,6 +275,31 @@ Generate a Phase 4 simulated scheme recommendation with:
 python recommend_scheme.py
 ```
 
+Run the presentation demo with five player names:
+
+```bash
+python demo.py --players "Jalen Brunson" "Josh Hart" "Mikal Bridges" "OG Anunoby" "Karl-Anthony Towns"
+```
+
+If you do not supply player names, the demo falls back to curated case studies:
+
+```bash
+python demo.py
+```
+
+You can also filter the demo to a team or lineup search string:
+
+```bash
+python demo.py --team BOS
+python demo.py --search Brunson
+```
+
+The matching notebook walkthrough lives in:
+
+```text
+notebooks/demo_workflow.ipynb
+```
+
 ## Notes On Data Quality
 
 - Some `nba_api` endpoints change behavior without warning.

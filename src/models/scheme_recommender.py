@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import matplotlib.pyplot as plt
 import pandas as pd
 import shap
 from xgboost import XGBRegressor
@@ -51,3 +52,14 @@ class XGBoostSchemeRecommender(BaseSchemeModel):
         explainer = shap.TreeExplainer(self.model)
         shap_values = explainer.shap_values(features)
         return pd.DataFrame(shap_values, columns=features.columns, index=features.index)
+
+    def plot_shap_summary(self, features: pd.DataFrame, output_path: str = "data/processed/plots/shap_summary.png") -> None:
+        """Generate and save a SHAP summary plot."""
+        explainer = shap.TreeExplainer(self.model)
+        shap_values = explainer.shap_values(features)
+        
+        plt.figure(figsize=(10, 6))
+        shap.summary_plot(shap_values, features, show=False)
+        plt.tight_layout()
+        plt.savefig(output_path, bbox_inches="tight")
+        plt.close()

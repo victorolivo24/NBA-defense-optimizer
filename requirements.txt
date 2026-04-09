@@ -7,3 +7,5 @@ scikit-learn
 numpy
 requests
 pytest
+matplotlib
+seaborn

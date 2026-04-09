@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 import re
 
+import matplotlib.pyplot as plt
 import pandas as pd
+import seaborn as sns
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -173,6 +176,38 @@ def build_default_case_studies(dataset: pd.DataFrame, min_minutes: float = 10.0)
     return pd.DataFrame(cases).reset_index(drop=True)
 
 
+def plot_recommendation_results(result: DemoResult, output_dir: str = "data/processed/plots") -> str:
+    """Generate and save a bar chart comparing the schemes."""
+    os.makedirs(output_dir, exist_ok=True)
+    safe_name = "".join([c if c.isalnum() else "_" for c in result.lineup_name])
+    output_path = os.path.join(output_dir, f"recommendation_{safe_name}.png")
+
+    df = result.recommendation.ranked_schemes
+    
+    plt.figure(figsize=(8, 5))
+    ax = sns.barplot(x="scheme", y="predicted_value", data=df, palette="viridis")
+    
+    # Add actual baseline if it exists as a baseline line
+    plt.axhline(y=result.baseline_prediction, color='r', linestyle='--', label=f'Baseline ({result.baseline_prediction:.1f})')
+    
+    # Add labels on top of bars
+    for i, p in enumerate(ax.patches):
+        ax.annotate(f"{df['predicted_value'].iloc[i]:.1f}",
+                    (p.get_x() + p.get_width() / 2., p.get_height()),
+                    ha='center', va='bottom', fontsize=10, color='black', xytext=(0, 5), textcoords='offset points')
+
+    plt.ylim(min(df["predicted_value"]) * 0.95, max(df["predicted_value"]) * 1.05)
+    plt.title(f"Predicted Defensive Rating by Scheme\n{result.lineup_name}")
+    plt.ylabel("Predicted Defensive Rating (Lower is Better)")
+    plt.xlabel("Defensive Scheme")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(output_path, bbox_inches="tight")
+    plt.close()
+    
+    return output_path
+
+
 def run_demo_for_lineups(
     lineups: pd.DataFrame,
     artifacts: TrainingArtifacts,
@@ -229,6 +264,9 @@ def format_demo_result(result: DemoResult, top_explanations: int = 5) -> str:
     if not explanation.empty:
         lines.append("Top explanation rows:")
         lines.append(explanation.to_string(index=False))
+
+    plot_path = plot_recommendation_results(result)
+    lines.append(f"\n=> Bar chart generated at: {plot_path}")
 
     return "\n".join(lines)
 

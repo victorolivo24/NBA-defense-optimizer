@@ -38,7 +38,7 @@ def recommend_scheme(
     explanation_rows = []
 
     for scheme_name, adjustments in scheme_profiles.items():
-        scenario_features = apply_scheme_profile(base_features, adjustments)
+        scenario_features = apply_scheme_profile(base_features, adjustments, artifacts)
         prediction = float(artifacts.model.predict(scenario_features)[0])
         scored_rows.append(
             {
@@ -49,6 +49,7 @@ def recommend_scheme(
 
         for feature, delta in adjustments.items():
             if feature in scenario_features.columns and delta != 0:
+                # We record the original intended delta for the explanation table
                 explanation_rows.append(
                     {
                         "scheme": scheme_name,
@@ -86,12 +87,67 @@ def recommend_scheme(
     )
 
 
-def apply_scheme_profile(features: pd.DataFrame, adjustments: dict[str, float]) -> pd.DataFrame:
-    """Apply additive simulator adjustments to a lineup feature row."""
+def apply_scheme_profile(
+    features: pd.DataFrame, 
+    adjustments: dict[str, float], 
+    artifacts: TrainingArtifacts | None = None
+) -> pd.DataFrame:
+    """
+    Apply additive simulator adjustments to a lineup feature row, scaled by baseline talent.
+    
+    Why this approach?
+    Applying flat scheme adjustments (e.g. -0.317 PPP) artificially inflates bad lineups, making them 
+    look like elite defenses just by changing the scheme.
+    
+    Talent-Scaling Math:
+    1. We use the min and max values from the training dataset (stored in artifacts) to compute a 
+       `talent_score` between 0.0 (worst) and 1.0 (elite) for the given feature.
+    2. If the scheme delta is beneficial (improves the defense), the lineup receives a percentage 
+       of that benefit equal to their talent_score (floored at 10% so bad teams get *some* effect).
+    3. If the scheme delta is detrimental (exposes a weakness), the lineup receives the penalty 
+       scaled by (1.0 - talent_score). Elite defenders mask the scheme's weaknesses, while bad 
+       defenders are fully exposed by it.
+    """
     adjusted = features.copy()
     for feature_name, delta in adjustments.items():
-        if feature_name in adjusted.columns:
-            adjusted.loc[:, feature_name] = adjusted[feature_name] + delta
+        if feature_name not in adjusted.columns:
+            continue
+            
+        if artifacts and hasattr(artifacts, 'feature_mins') and hasattr(artifacts, 'feature_maxs') and artifacts.feature_mins and artifacts.feature_maxs:
+            f_min = artifacts.feature_mins.get(feature_name)
+            f_max = artifacts.feature_maxs.get(feature_name)
+            
+            if f_min is not None and f_max is not None and f_max > f_min:
+                current_vals = adjusted[feature_name].clip(lower=f_min, upper=f_max)
+                
+                # Determine if higher values are better for this specific feature
+                # Typically, percentile, count, and size metrics are "higher is better"
+                # PPP metrics are "lower is better"
+                is_higher_better = any(token in feature_name for token in ["percentile", "count", "size"])
+                
+                if is_higher_better:
+                    talent_score = (current_vals - f_min) / (f_max - f_min)
+                else:
+                    # For PPP allowed, lower is better (so if current == f_min, score = 1.0)
+                    talent_score = (f_max - current_vals) / (f_max - f_min)
+                    
+                # delta > 0 is beneficial if higher is better, else delta < 0 is beneficial
+                is_beneficial = (delta > 0) if is_higher_better else (delta < 0)
+                
+                if is_beneficial:
+                    # Elite gets full benefit, bad gets minimum 10% benefit
+                    effective_scaler = talent_score.clip(lower=0.1)
+                else:
+                    # Elite masks the penalty (gets 10%), bad gets full penalty (100%)
+                    effective_scaler = (1.0 - talent_score).clip(lower=0.1)
+                    
+                scaled_delta = delta * effective_scaler
+                adjusted[feature_name] = adjusted[feature_name] + scaled_delta
+            else:
+                adjusted[feature_name] = adjusted[feature_name] + delta
+        else:
+            adjusted[feature_name] = adjusted[feature_name] + delta
+            
     return adjusted
 
 

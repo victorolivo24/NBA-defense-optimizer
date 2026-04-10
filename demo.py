@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+from pathlib import Path
 
 from src.demo import (
     build_default_case_studies,
@@ -40,6 +42,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=3,
         help="Maximum number of matching lineups to display when filters are used.",
     )
+    parser.add_argument(
+        "--hardcoded",
+        action="store_true",
+        help="Force the use of original hardcoded scheme profiles instead of dynamic ones.",
+    )
     return parser
 
 
@@ -48,6 +55,18 @@ if __name__ == "__main__":
         sys.stdout.reconfigure(errors="replace")
 
     args = build_parser().parse_args()
+    
+    dynamic_profiles = None
+    if not args.hardcoded:
+        try:
+            path = Path("data/processed/dynamic_scheme_profiles.json")
+            if path.exists():
+                with open(path, "r") as f:
+                    dynamic_profiles = json.load(f)
+                print(f"Loaded dynamic scheme profiles from {path}.\n")
+        except Exception as e:
+            print(f"Warning: Failed to load dynamic profiles ({e}). Falling back to hardcoded defaults.\n")
+            
     dataset, artifacts = train_demo_artifacts(season=args.season)
 
     case_label_column = None
@@ -68,13 +87,16 @@ if __name__ == "__main__":
     else:
         selected = build_default_case_studies(dataset, min_minutes=args.min_minutes)
         case_label_column = "case_label"
-        print("No player input supplied. Showing default case studies.\n")
+        if not args.hardcoded and dynamic_profiles:
+            print("No player input supplied. Showing default case studies.\n")
+        else:
+            print("No player input supplied. Showing default case studies.\n")
 
     if selected.empty:
         selected = build_default_case_studies(dataset, min_minutes=args.min_minutes)
         case_label_column = "case_label"
         print("No matching lineups found. Falling back to default case studies.\n")
 
-    for result in run_demo_for_lineups(selected, artifacts, case_label_column=case_label_column):
+    for result in run_demo_for_lineups(selected, artifacts, case_label_column=case_label_column, scheme_profiles=dynamic_profiles):
         print(format_demo_result(result))
         print("\n" + "=" * 80 + "\n")

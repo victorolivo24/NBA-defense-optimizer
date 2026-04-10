@@ -39,6 +39,8 @@ class TrainingArtifacts:
     metrics: dict[str, float]
     train_rows: int
     test_rows: int
+    feature_mins: dict[str, float] | None = None
+    feature_maxs: dict[str, float] | None = None
 
 
 def build_model_dataset(
@@ -120,6 +122,9 @@ def train_baseline_regressor(
         "rmse": float(root_mean_squared_error(y_test, predictions)),
     }
 
+    feature_mins = features.min().to_dict()
+    feature_maxs = features.max().to_dict()
+
     return TrainingArtifacts(
         model=model,
         target_column=target_column,
@@ -127,6 +132,8 @@ def train_baseline_regressor(
         metrics=metrics,
         train_rows=len(x_train),
         test_rows=len(x_test),
+        feature_mins=feature_mins,
+        feature_maxs=feature_maxs,
     )
 
 

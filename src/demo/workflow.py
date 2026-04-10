@@ -185,7 +185,7 @@ def plot_recommendation_results(result: DemoResult, output_dir: str = "data/proc
     df = result.recommendation.ranked_schemes
     
     plt.figure(figsize=(8, 5))
-    ax = sns.barplot(x="scheme", y="predicted_value", data=df, palette="viridis")
+    ax = sns.barplot(x="scheme", y="predicted_value", data=df, hue="scheme", palette="viridis", legend=False)
     
     # Add actual baseline if it exists as a baseline line
     plt.axhline(y=result.baseline_prediction, color='r', linestyle='--', label=f'Baseline ({result.baseline_prediction:.1f})')
@@ -213,11 +213,12 @@ def run_demo_for_lineups(
     artifacts: TrainingArtifacts,
     *,
     case_label_column: str | None = None,
+    scheme_profiles: dict[str, dict[str, float]] | None = None,
 ) -> list[DemoResult]:
     """Run recommendations for one or more selected lineup rows."""
     results: list[DemoResult] = []
     for index, (_, lineup_row) in enumerate(lineups.iterrows(), start=1):
-        recommendation = recommend_scheme(lineup_row, artifacts)
+        recommendation = recommend_scheme(lineup_row, artifacts, scheme_profiles=scheme_profiles)
         baseline_prediction = _predict_baseline(lineup_row, artifacts)
         case_label = (
             str(lineup_row[case_label_column])

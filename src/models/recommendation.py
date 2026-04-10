@@ -100,8 +100,9 @@ def apply_scheme_profile(
     look like elite defenses just by changing the scheme.
     
     Talent-Scaling Math:
-    1. We use the min and max values from the training dataset (stored in artifacts) to compute a 
-       `talent_score` between 0.0 (worst) and 1.0 (elite) for the given feature.
+    1. We use the 5th and 95th percentiles from the training dataset (stored in artifacts as min/max)
+       to compute a `talent_score` between 0.0 (worst) and 1.0 (elite). Clipping at these percentiles 
+       prevents extreme outliers from stretching the scale and making average defenders look elite.
     2. If the scheme delta is beneficial (improves the defense), the lineup receives a percentage 
        of that benefit equal to their talent_score (floored at 10% so bad teams get *some* effect).
     3. If the scheme delta is detrimental (exposes a weakness), the lineup receives the penalty 

@@ -122,8 +122,9 @@ def train_baseline_regressor(
         "rmse": float(root_mean_squared_error(y_test, predictions)),
     }
 
-    feature_mins = features.min().to_dict()
-    feature_maxs = features.max().to_dict()
+    # Use 5th and 95th percentiles for robust scaling (ignoring outliers)
+    feature_mins = features.quantile(0.05).to_dict()
+    feature_maxs = features.quantile(0.95).to_dict()
 
     return TrainingArtifacts(
         model=model,

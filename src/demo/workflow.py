@@ -13,8 +13,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from src.database.connection import DEFAULT_DATABASE_URL, create_session_factory
+from src.database.ingest import parse_lineup_player_ids
 from src.database.schema import Player
 from src.features import build_synthetic_lineup_row, build_training_dataset
+from src.features.lineup_dataset import _resolve_team_abbreviation
 from src.models import (
     DEFAULT_TARGET_COLUMN,
     SchemeRecommendation,
@@ -31,6 +33,21 @@ CASE_STUDY_LABELS = (
     ("Worst Actual Defense", "defensive_rating_target", True),
     ("Best Isolation Defense", "isolation_ppp_mean", False),
 )
+OVERLAP_WEIGHTS = {
+    5: 1.0,
+    4: 0.7,
+    3: 0.4,
+    2: 0.15,
+}
+NON_BLEND_COLUMNS = {
+    "lineup_id",
+    "lineup_key",
+    "lineup_name",
+    "season",
+    "team_abbreviation",
+    "case_label",
+    "defensive_rating_target_source",
+}
 
 
 @dataclass
@@ -44,6 +61,7 @@ class DemoResult:
     minutes_played: float | None
     actual_target: float | None
     actual_target_source: str | None
+    lineup_source: str | None
     baseline_prediction: float
     recommendation: SchemeRecommendation
 
@@ -107,11 +125,19 @@ def make_custom_lineup_demo_frame(
     player_names: list[str],
     *,
     season: str,
+    dataset: pd.DataFrame | None = None,
     database_url: str = DEFAULT_DATABASE_URL,
 ) -> pd.DataFrame:
     """Build a one-row demo dataset from five user-specified players."""
     players = load_players_for_demo(player_names, season=season, database_url=database_url)
+    if dataset is not None and not dataset.empty:
+        matched = _build_historical_or_blended_lineup(players, dataset, season=season)
+        if matched is not None:
+            matched["case_label"] = "Custom Lineup"
+            return pd.DataFrame([matched])
+
     row = build_synthetic_lineup_row(players, season=season)
+    row["lineup_source"] = "synthetic_player_profile"
     frame = pd.DataFrame([row])
     frame["case_label"] = "Custom Lineup"
     return frame
@@ -193,9 +219,16 @@ def plot_recommendation_results(result: DemoResult, output_dir: str = "data/proc
     
     # Add labels on top of bars
     for i, p in enumerate(ax.patches):
-        ax.annotate(f"{df['predicted_value'].iloc[i]:.1f}",
-                    (p.get_x() + p.get_width() / 2., p.get_height()),
-                    ha='center', va='bottom', fontsize=10, color='black', xytext=(0, 5), textcoords='offset points')
+        ax.annotate(
+            f"{df['predicted_value'].iloc[i]:.1f}",
+            (p.get_x() + p.get_width() / 2.0, p.get_height()),
+            ha='center',
+            va='bottom',
+            fontsize=10,
+            color='black',
+            xytext=(0, 5),
+            textcoords='offset points',
+        )
 
     plt.ylim(min(df["predicted_value"]) * 0.95, max(df["predicted_value"]) * 1.05)
     plt.title(f"Predicted Defensive Rating by Scheme\n{result.lineup_name}")
@@ -235,6 +268,7 @@ def run_demo_for_lineups(
                 minutes_played=_optional_float(lineup_row.get("minutes_played")),
                 actual_target=_optional_float(lineup_row.get(artifacts.target_column)),
                 actual_target_source=_optional_str(lineup_row.get("defensive_rating_target_source")),
+                lineup_source=_optional_str(lineup_row.get("lineup_source")),
                 baseline_prediction=baseline_prediction,
                 recommendation=recommendation,
             )
@@ -262,6 +296,8 @@ def format_demo_result(result: DemoResult, top_explanations: int = 5) -> str:
         elif result.actual_target_source == "api_defensive_rating":
             target_label = "Actual target (API defensive rating)"
         meta.append(f"{target_label}: {result.actual_target:.2f}")
+    if result.lineup_source:
+        meta.append(f"Source: {result.lineup_source}")
     meta.append(f"Baseline prediction: {result.baseline_prediction:.2f}")
     lines.append(" | ".join(meta))
     lines.append(f"Recommended scheme: {result.recommendation.recommended_scheme}")
@@ -338,3 +374,85 @@ def _format_ambiguity_message(name: str, matches: list[Player]) -> str:
 
 def _normalize_name(name: str) -> str:
     return re.sub(r"[^a-z0-9]", "", name.casefold())
+
+
+def _build_historical_or_blended_lineup(
+    players: list[Player],
+    dataset: pd.DataFrame,
+    *,
+    season: str,
+) -> dict[str, object] | None:
+    desired_ids = [player.nba_player_id for player in players]
+    desired_set = set(desired_ids)
+    same_team = _resolve_team_abbreviation(players)
+
+    working = dataset.copy()
+    working["_parsed_ids"] = working["lineup_key"].map(parse_lineup_player_ids)
+    working["_overlap_count"] = working["_parsed_ids"].map(lambda ids: len(set(ids) & desired_set))
+    working = working[working["_overlap_count"] >= 2].copy()
+    if working.empty:
+        return None
+
+    if same_team and same_team != "MIX":
+        same_team_matches = working[working["team_abbreviation"] == same_team].copy()
+        if not same_team_matches.empty:
+            working = same_team_matches
+
+    exact_matches = working[working["_overlap_count"] == 5].copy()
+    if not exact_matches.empty:
+        exact_row = exact_matches.sort_values("minutes_played", ascending=False).iloc[0].copy()
+        exact_row["lineup_source"] = "exact_historical_lineup"
+        return exact_row.to_dict()
+
+    working["_weight"] = working.apply(_overlap_weight, axis=1)
+    working = working[working["_weight"] > 0].copy()
+    if working.empty:
+        return None
+
+    synthetic = build_synthetic_lineup_row(players, season=season)
+    blended = dict(synthetic)
+    weighted = _weighted_feature_average(working)
+
+    for column, value in weighted.items():
+        blended[column] = value
+
+    blended["lineup_name"] = " - ".join(player.full_name for player in players)
+    blended["team_abbreviation"] = same_team
+    blended["lineup_source"] = _resolve_blend_label(working)
+    if pd.notna(weighted.get("defensive_rating_target")):
+        blended["defensive_rating_target_source"] = "weighted_historical_overlap"
+    return blended
+
+
+def _overlap_weight(row: pd.Series) -> float:
+    overlap = int(row["_overlap_count"])
+    overlap_weight = OVERLAP_WEIGHTS.get(overlap, 0.0)
+    minutes = float(row.get("minutes_played") or 0.0)
+    minute_weight = 1.0 + min(minutes, 500.0) / 500.0
+    return overlap_weight * minute_weight
+
+
+def _weighted_feature_average(candidates: pd.DataFrame) -> dict[str, float]:
+    weights = candidates["_weight"].astype(float)
+    numeric_columns: dict[str, float] = {}
+    for column in candidates.columns:
+        if column in NON_BLEND_COLUMNS or column.startswith("_"):
+            continue
+
+        series = pd.to_numeric(candidates[column], errors="coerce")
+        valid = series.notna() & weights.notna()
+        if not valid.any():
+            continue
+
+        numeric_columns[column] = float((series[valid] * weights[valid]).sum() / weights[valid].sum())
+
+    return numeric_columns
+
+
+def _resolve_blend_label(candidates: pd.DataFrame) -> str:
+    max_overlap = int(candidates["_overlap_count"].max())
+    if max_overlap >= 4:
+        return "weighted_historical_overlap_4_plus"
+    if max_overlap == 3:
+        return "weighted_historical_overlap_3"
+    return "weighted_historical_overlap_2"

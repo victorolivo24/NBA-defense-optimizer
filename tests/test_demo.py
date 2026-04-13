@@ -1,7 +1,12 @@
 import pandas as pd
 
 from src.database.schema import DefensivePlayType, Player
-from src.demo.workflow import build_default_case_studies, format_demo_result, select_lineups
+from src.demo.workflow import (
+    _build_historical_or_blended_lineup,
+    build_default_case_studies,
+    format_demo_result,
+    select_lineups,
+)
 from src.features import build_synthetic_lineup_row
 from src.models.recommendation import SchemeRecommendation
 
@@ -85,6 +90,7 @@ def test_format_demo_result_contains_recommendation_summary():
         minutes_played=18.5,
         actual_target=106.1,
         actual_target_source="fallback_points_allowed_per_48",
+        lineup_source="synthetic_player_profile",
         baseline_prediction=107.4,
         recommendation=recommendation,
     )
@@ -95,6 +101,7 @@ def test_format_demo_result_contains_recommendation_summary():
     assert "Sample Lineup" in formatted
     assert "Scheme ranking:" in formatted
     assert "Actual target (fallback per 48)" in formatted
+    assert "Source: synthetic_player_profile" in formatted
 
 
 def test_build_synthetic_lineup_row_aggregates_five_players():
@@ -150,3 +157,107 @@ def test_build_synthetic_lineup_row_aggregates_five_players():
     assert row["defensive_rating_target"] is None
     assert row["defensive_rating_target_source"] is None
     assert row["isolation_player_count"] == 5
+
+
+def test_build_historical_or_blended_lineup_prefers_exact_match():
+    players = [
+        Player(nba_player_id=1, full_name="Player One", team_abbreviation="BOS"),
+        Player(nba_player_id=2, full_name="Player Two", team_abbreviation="BOS"),
+        Player(nba_player_id=3, full_name="Player Three", team_abbreviation="BOS"),
+        Player(nba_player_id=4, full_name="Player Four", team_abbreviation="BOS"),
+        Player(nba_player_id=5, full_name="Player Five", team_abbreviation="BOS"),
+    ]
+    dataset = pd.DataFrame(
+        [
+            {
+                "lineup_key": "-1-2-3-4-5-",
+                "lineup_name": "Exact Lineup",
+                "team_abbreviation": "BOS",
+                "minutes_played": 120.0,
+                "possessions": 250.0,
+                "defensive_rating_target": 108.2,
+                "defensive_rating_target_source": "api_defensive_rating",
+                "lineup_size": 5,
+                "guard_count": 2,
+                "forward_count": 2,
+                "center_count": 1,
+            }
+        ]
+    )
+
+    result = _build_historical_or_blended_lineup(players, dataset, season="2024-25")
+
+    assert result is not None
+    assert result["lineup_name"] == "Exact Lineup"
+    assert result["lineup_source"] == "exact_historical_lineup"
+    assert result["defensive_rating_target"] == 108.2
+
+
+def test_build_historical_or_blended_lineup_blends_partial_matches():
+    players = []
+    for index in range(5):
+        player = Player(
+            nba_player_id=index + 1,
+            full_name=f"Player {index + 1}",
+            team_abbreviation="BOS",
+            position="G" if index < 2 else ("F" if index < 4 else "C"),
+            height="6-6",
+            weight=220,
+        )
+        player.defensive_play_types = [
+            DefensivePlayType(
+                season="2024-25",
+                play_type="Isolation",
+                ppp_allowed=0.9,
+                possessions=20,
+                percentile=60,
+            )
+        ]
+        players.append(player)
+
+    dataset = pd.DataFrame(
+        [
+            {
+                "lineup_key": "-1-2-3-4-8-",
+                "lineup_name": "Four Man Overlap",
+                "team_abbreviation": "BOS",
+                "minutes_played": 200.0,
+                "possessions": 400.0,
+                "defensive_rating_target": 107.0,
+                "defensive_rating_target_source": "api_defensive_rating",
+                "lineup_size": 5,
+                "guard_count": 2,
+                "forward_count": 2,
+                "center_count": 1,
+                "avg_height_inches": 78.0,
+                "avg_weight": 220.0,
+                "isolation_player_count": 5,
+                "isolation_ppp_mean": 0.95,
+            },
+            {
+                "lineup_key": "-1-2-3-9-10-",
+                "lineup_name": "Three Man Overlap",
+                "team_abbreviation": "BOS",
+                "minutes_played": 120.0,
+                "possessions": 240.0,
+                "defensive_rating_target": 113.0,
+                "defensive_rating_target_source": "api_defensive_rating",
+                "lineup_size": 5,
+                "guard_count": 2,
+                "forward_count": 2,
+                "center_count": 1,
+                "avg_height_inches": 78.0,
+                "avg_weight": 220.0,
+                "isolation_player_count": 5,
+                "isolation_ppp_mean": 1.05,
+            },
+        ]
+    )
+
+    result = _build_historical_or_blended_lineup(players, dataset, season="2024-25")
+
+    assert result is not None
+    assert result["lineup_name"] == "Player 1 - Player 2 - Player 3 - Player 4 - Player 5"
+    assert result["lineup_source"] == "weighted_historical_overlap_4_plus"
+    assert result["defensive_rating_target_source"] == "weighted_historical_overlap"
+    assert 107.0 < result["defensive_rating_target"] < 113.0

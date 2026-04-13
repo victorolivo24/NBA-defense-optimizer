@@ -73,7 +73,7 @@ if __name__ == "__main__":
     has_filters = any([args.lineup_key, args.team, args.search])
 
     if args.players:
-        selected = make_custom_lineup_demo_frame(args.players, season=args.season)
+        selected = make_custom_lineup_demo_frame(args.players, season=args.season, dataset=dataset)
         case_label_column = "case_label"
     elif has_filters:
         selected = select_lineups(

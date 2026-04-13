@@ -1,6 +1,7 @@
 """Explicit scheme simulator profiles used by the recommendation layer."""
 
 from __future__ import annotations
+# coaches adjust scheme profile
 
 DEFAULT_SCHEME_PROFILES: dict[str, dict[str, float]] = {
     "Drop": {

@@ -1,0 +1,411 @@
+# Implementation Log
+
+This document is the interview and presentation log for the project. It records what the system is trying to do, what was actually implemented, what failed, what was changed, and what the current metrics mean.
+
+## Project Framing
+
+Current project description:
+
+- `Lineup-Aware Defensive Scheme Simulator and Recommendation Engine`
+
+Why this framing changed:
+
+- The original idea was closer to a defensive scheme classifier.
+- The public NBA stats API does not expose possession-level labels that say a defense was in `Drop`, `Switch`, or `Zone`.
+- Because those labels do not exist in the public data, the project cannot honestly claim to be a supervised scheme classifier.
+- The current system instead:
+  - predicts lineup-level defensive outcome with ML
+  - simulates how candidate coverages may change that outcome
+  - recommends the lowest predicted defensive-cost option
+
+Interview version:
+
+- The model predicts lineup defensive outcome.
+- The recommendation layer is heuristic and simulation-based.
+- The project is ML-assisted recommendation, not end-to-end supervised scheme classification.
+
+## End-to-End Pipeline
+
+Current pipeline:
+
+1. Ingest defensive player stats, defensive play-type stats, and five-man lineup stats from `nba_api`.
+2. Persist raw JSON snapshots under `data/raw/` for reproducibility.
+3. Normalize data into SQLite with SQLAlchemy.
+4. Build lineup-level features from the five players in each lineup.
+5. Train an XGBoost regressor on lineup defensive outcome.
+6. Simulate candidate schemes by adjusting lineup features using explicit scheme profiles.
+7. Recommend the scheme with the lowest predicted defensive outcome.
+
+Current demo flow:
+
+1. User enters five player names.
+2. The app resolves those names from the `players` table.
+3. It builds a synthetic lineup feature row from those five players.
+4. It predicts the baseline defensive outcome.
+5. It simulates `Drop`, `Switch`, and `Zone`.
+6. It prints the ranked recommendation and explanation rows.
+
+Important display note:
+
+- when a historical lineup target came from the fallback formula instead of a possession-based defensive rating field, the demo should label it as `Actual target (fallback per 48)`
+
+## Inputs and Outputs
+
+Primary input:
+
+- five player names
+
+Supporting inputs:
+
+- season, for example `2024-25`
+- optional existing lineup search or team filters for fallback demo mode
+
+Feature inputs used by the model:
+
+- lineup size
+- guard, forward, and center counts
+- average height and weight
+- play-type feature aggregates such as:
+  - `isolation_ppp_mean`
+  - `pick_and_roll_ball_handler_ppp_mean`
+  - `pick_and_roll_roll_man_ppp_mean`
+  - `spot_up_ppp_mean`
+  - possession and percentile summaries for each play type
+
+Primary model output:
+
+- `defensive_rating_target`
+
+Alternative target:
+
+- `opponent_ppp_target`
+
+Recommendation output:
+
+- recommended scheme
+- ranked schemes with predicted values
+- SHAP-backed explanation rows for the baseline feature profile
+
+## Database and Data Model
+
+Core tables:
+
+- `players`
+- `defensive_play_types`
+- `lineup_metrics`
+- `lineup_players`
+
+Important schema decision:
+
+- lineups are mapped to players through a many-to-many association table with a `slot` field from `1` to `5`
+
+Why:
+
+- it keeps players reusable across lineups
+- it supports SQL joins for feature engineering
+- it keeps the model layer separate from ingestion
+
+## Ingestion Notes
+
+What ingestion does:
+
+- fetches player defense from `LeagueDashPlayerStats`
+- fetches defensive play types from `SynergyPlayTypes`
+- fetches five-man lineups from `LeagueDashLineups`
+- writes raw snapshots before transformation
+- upserts normalized records into SQLite
+
+Important operational note:
+
+- the NBA API is rate-limit sensitive
+- `time.sleep()` was intentionally kept in the ingestion path to avoid being blocked
+
+## Major Failures and Fixes
+
+### 1. API connectivity failed in script even though notebook code worked
+
+Observed failure:
+
+- notebook requests worked
+- `ingest.py` failed with request refusal before data returned
+
+Root cause:
+
+- broken proxy environment variables in the shell
+- mismatched `SynergyPlayTypes` arguments in the script
+- live lineup `GROUP_ID` parsing assumptions were too strict
+
+Fix:
+
+- temporarily clear proxy env vars during NBA requests
+- use supported `SynergyPlayTypes` parameters
+- normalize live play-type labels
+- update lineup parsing to handle live hyphen-wrapped `GROUP_ID` values
+
+Result:
+
+- live ingestion succeeded
+- raw snapshots were written
+- database was populated from real API data
+
+### 2. Project originally overclaimed scheme supervision
+
+Observed issue:
+
+- the code and docs implied the model might learn actual defensive scheme choice
+
+Root cause:
+
+- no public possession-level scheme labels exist in the NBA API
+
+Fix:
+
+- reframe the project as a simulator and recommendation engine
+- keep ML focused on lineup defensive outcome
+- make scheme logic explicit and heuristic
+
+Result:
+
+- framing is more honest and easier to defend academically
+
+### 3. Demo originally selected historical lineups by minutes instead of taking user players
+
+Observed issue:
+
+- default demo was useful for presentation
+- but it did not reflect the intended product workflow
+
+Fix:
+
+- add player-name lookup
+- build synthetic lineup rows from five chosen players
+- run the recommendation directly on that synthetic lineup
+
+Result:
+
+- the demo is now player-input driven
+
+### 4. Training pipeline was too vulnerable to noise
+
+Observed issues:
+
+- low-minute lineups could create unstable lineup targets
+- low-possession play-type stats could create misleading player defensive profiles
+- mean imputation was vulnerable to skew from outliers
+
+Fix:
+
+- set a minimum lineup minutes threshold for training data
+- set a minimum play-type possessions threshold before a play-type stat is included
+- switch missing-value imputation from mean to median
+
+Current defaults:
+
+- `DEFAULT_MIN_LINEUP_MINUTES = 10.0`
+- `DEFAULT_MIN_PLAY_TYPE_POSSESSIONS = 10.0`
+
+Why this matters:
+
+- it reduces noise from tiny samples
+- it makes the training rows more stable
+- it reduces the impact of extreme outliers during imputation
+
+### 5. We initially pulled the wrong lineup endpoint view for the target
+
+Observed issue:
+
+- every lineup training row used the fallback target
+- `288 / 288` training rows were labeled `fallback_points_allowed_per_48`
+- `0 / 2000` stored lineup rows had possessions
+- the demo showed inflated historical targets like `161.12` for some OKC lineups
+
+Root cause:
+
+- the ingestion code was calling `LeagueDashLineups` with `measure_type_detailed_defense='Defense'`
+- that returned a box-score-style lineup table with fields like `MIN`, `PTS`, `FGM`, and `FGA`
+- it did not return the advanced lineup fields we actually needed, such as `DEF_RATING`, `PACE`, and `POSS`
+
+How we discovered it:
+
+- we directly queried the endpoint in the repo environment with two parameter settings
+- `measure_type_detailed_defense='Defense'` returned no possession-based advanced columns
+- `measure_type_detailed_defense='Advanced'` returned:
+  - `DEF_RATING`
+  - `OFF_RATING`
+  - `NET_RATING`
+  - `PACE`
+  - `POSS`
+
+Fix:
+
+- switch lineup ingestion to the advanced lineup view
+- keep the fallback target only as a backup when advanced fields are still missing
+
+Why this matters:
+
+- it replaces a proxy target with a real API-provided lineup defensive rating whenever possible
+- it should reduce extreme target values caused by the per-48 fallback formula
+
+Post-fix verification:
+
+- `python ingest.py` succeeded with the advanced lineup view
+- rebuilt feature dataset size: `2060` rows
+- rebuilt training dataset source breakdown:
+  - `api_defensive_rating = 2060`
+  - `fallback_points_allowed_per_48 = 0`
+- database verification after the fix:
+  - `3149` total lineup rows stored
+  - `2000` lineup rows with possessions present from the advanced endpoint
+
+Interpretation:
+
+- the API does provide real lineup `DEF_RATING` and `POSS` when queried through the advanced lineup view
+- the earlier fallback-only dataset was caused by using the wrong lineup endpoint configuration, not by an unavoidable API limitation
+
+## Modeling Decisions
+
+Baseline model:
+
+- `XGBoostSchemeRecommender`
+
+Why XGBoost:
+
+- handles nonlinear interactions well
+- reasonable for tabular features
+- supports feature importance and SHAP explanation
+
+What the model predicts:
+
+- lineup defensive outcome, not scheme label
+
+Target definition:
+
+- default target: `defensive_rating_target`
+- fallback target source: points allowed per 48 minutes when direct defensive rating is unavailable from the live lineup endpoint
+
+Why this fallback exists:
+
+- live lineup data did not reliably expose a direct defensive rating field in all cases
+
+How we now surface this clearly:
+
+- the engineered dataset includes `defensive_rating_target_source`
+- values are labeled as either:
+  - `api_defensive_rating`
+  - `fallback_points_allowed_per_48`
+- the demo output now prints that distinction directly instead of showing a generic `actual target`
+
+## Recommendation Logic
+
+Where the heuristic lives:
+
+- `src/models/scheme_profiles.py`
+
+How recommendation works:
+
+1. build or load a lineup feature row
+2. run baseline prediction
+3. apply additive scheme profile adjustments
+4. rescore each scheme-adjusted lineup
+5. choose the scheme with the lowest predicted value
+
+Important caveat:
+
+- the scheme profile adjustments are hand-set basketball heuristics
+- they are not learned from labeled historical scheme data
+
+Why those heuristics were used:
+
+- public data does not include scheme labels
+- the project still needed an interpretable simulation layer for `Drop`, `Switch`, and `Zone`
+
+## Evaluation and Metrics
+
+Training metrics used:
+
+- `MAE`
+- `RMSE`
+
+Recent verified training run after stricter filtering changes:
+
+- after switching lineup ingestion to the advanced lineup view:
+  - train rows: `1545`
+  - test rows: `515`
+  - `MAE = 14.5110`
+  - `RMSE = 18.8088`
+
+What these metrics mean:
+
+- the model is judged on how close its predicted lineup defensive outcome is to the stored historical target
+- these are baseline outcome-model metrics, not direct scheme recommendation accuracy metrics
+
+## Verified Demo Example
+
+Verified player-input demo run:
+
+```bash
+python demo.py --players "Jalen Brunson" "Josh Hart" "Mikal Bridges" "OG Anunoby" "Karl-Anthony Towns"
+```
+
+Observed output:
+
+- baseline prediction: `129.95`
+- recommended scheme: `Drop`
+- ranking:
+  - `Drop = 126.264038`
+  - `Switch = 127.664391`
+  - `Zone = 131.440018`
+
+What this demonstrates:
+
+- the demo can resolve five named players from the database
+- build a synthetic lineup profile
+- score all candidate schemes
+- return a recommendation with explanation rows
+
+## What Is Still Weak
+
+Known limitations:
+
+- no true public scheme labels
+- no possession-level coaching coverage ground truth
+- heuristic scheme profiles are manually specified
+- current recommendation evaluation is weaker than the baseline model evaluation
+- historical lineup targets can still be noisy even after thresholding
+
+If asked what the biggest weakness is:
+
+- the biggest weakness is label quality for the final recommendation problem, not the mechanics of ingestion or model training
+
+## Best Interview Answers
+
+If asked "What does the ML do?":
+
+- It predicts lineup-level defensive outcome, primarily defensive rating.
+
+If asked "What does the heuristic do?":
+
+- It simulates how candidate coverages might shift the lineup feature profile before rescoring.
+
+If asked "Why not call it a classifier?":
+
+- Because the public NBA API does not provide true scheme labels, so a supervised scheme classifier would overstate what the data supports.
+
+If asked "Why did you add filtering thresholds?":
+
+- Because tiny lineup samples and one-off play-type possessions create unstable targets and toxic outliers.
+
+If asked "Why median imputation instead of mean?":
+
+- Because the mean is more sensitive to extreme outliers, which was exactly the failure mode we were worried about.
+
+## Recent Commit Milestones
+
+Important milestones in repo history:
+
+- `5af749e` `Fix live NBA API ingestion and proxy handling`
+- `88da58d` `Add Phase 3 baseline training pipeline`
+- `a3a630d` `score drop, switch, and zone, feature adjustments, rank schemes`
+- `4dc97b5` `Extract scheme simulator profiles`
+- `e2733a1` `Reframe project as simulation and recommendation engine`
+- `7914ede` `add demo modules`

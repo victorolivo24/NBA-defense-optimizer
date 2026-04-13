@@ -182,7 +182,8 @@ Current target note:
 - The project does not yet have true historical defensive-scheme labels.
 - Phase 3 therefore uses lineup defensive outcome targets as a surrogate learning problem.
 - The default baseline target is `defensive_rating_target`.
-- When the live lineup endpoint does not expose a direct defensive rating, the ingestion layer derives a fallback target from opponent points allowed per 48 minutes.
+- Lineup ingestion now uses the advanced `LeagueDashLineups` view so the API can return lineup `DEF_RATING`, `PACE`, and `POSS`.
+- The fallback target from opponent points allowed per 48 minutes is now only used when the advanced lineup view still fails to provide a direct defensive rating.
 - This is not a direct scheme classifier; it is the first defensible supervised training step for the simulator.
 
 Live NBA API validation note:
@@ -281,6 +282,8 @@ Run the presentation demo with five player names:
 python demo.py --players "Jalen Brunson" "Josh Hart" "Mikal Bridges" "OG Anunoby" "Karl-Anthony Towns"
 ```
 
+When a historical lineup row uses the fallback target instead of a possession-based defensive rating, the demo labels it explicitly as `Actual target (fallback per 48)`.
+
 If you do not supply player names, the demo falls back to curated case studies:
 
 ```bash
@@ -316,6 +319,16 @@ The scaffold reflects the project proposal in `project-proposal.txt`:
 - A tree-based modeling path using XGBoost.
 - Explainability support through SHAP.
 - A modular pipeline that can evolve from a class project scaffold into a full simulation and recommendation engine.
+
+## Study Log
+
+The running implementation history, modeling choices, failures, fixes, and current metrics are documented in:
+
+```text
+docs/implementation_log.md
+```
+
+Use that file as the project study guide before presentations or interviews.
 
 ## Positioning Note
 

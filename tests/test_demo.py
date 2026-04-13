@@ -84,6 +84,7 @@ def test_format_demo_result_contains_recommendation_summary():
         team_abbreviation="BOS",
         minutes_played=18.5,
         actual_target=106.1,
+        actual_target_source="fallback_points_allowed_per_48",
         baseline_prediction=107.4,
         recommendation=recommendation,
     )
@@ -93,6 +94,7 @@ def test_format_demo_result_contains_recommendation_summary():
     assert "Recommended scheme: Switch" in formatted
     assert "Sample Lineup" in formatted
     assert "Scheme ranking:" in formatted
+    assert "Actual target (fallback per 48)" in formatted
 
 
 def test_build_synthetic_lineup_row_aggregates_five_players():
@@ -146,4 +148,5 @@ def test_build_synthetic_lineup_row_aggregates_five_players():
     assert row["center_count"] == 1
     assert row["team_abbreviation"] == "NYK"
     assert row["defensive_rating_target"] is None
+    assert row["defensive_rating_target_source"] is None
     assert row["isolation_player_count"] == 5

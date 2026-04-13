@@ -43,6 +43,7 @@ class DemoResult:
     team_abbreviation: str | None
     minutes_played: float | None
     actual_target: float | None
+    actual_target_source: str | None
     baseline_prediction: float
     recommendation: SchemeRecommendation
 
@@ -233,6 +234,7 @@ def run_demo_for_lineups(
                 team_abbreviation=_optional_str(lineup_row.get("team_abbreviation")),
                 minutes_played=_optional_float(lineup_row.get("minutes_played")),
                 actual_target=_optional_float(lineup_row.get(artifacts.target_column)),
+                actual_target_source=_optional_str(lineup_row.get("defensive_rating_target_source")),
                 baseline_prediction=baseline_prediction,
                 recommendation=recommendation,
             )
@@ -254,7 +256,12 @@ def format_demo_result(result: DemoResult, top_explanations: int = 5) -> str:
     if result.minutes_played is not None:
         meta.append(f"Minutes: {result.minutes_played:.1f}")
     if result.actual_target is not None:
-        meta.append(f"Actual target: {result.actual_target:.2f}")
+        target_label = "Actual target"
+        if result.actual_target_source == "fallback_points_allowed_per_48":
+            target_label = "Actual target (fallback per 48)"
+        elif result.actual_target_source == "api_defensive_rating":
+            target_label = "Actual target (API defensive rating)"
+        meta.append(f"{target_label}: {result.actual_target:.2f}")
     meta.append(f"Baseline prediction: {result.baseline_prediction:.2f}")
     lines.append(" | ".join(meta))
     lines.append(f"Recommended scheme: {result.recommendation.recommended_scheme}")

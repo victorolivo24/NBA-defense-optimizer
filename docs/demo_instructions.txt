@@ -49,17 +49,20 @@ python demo.py --search Brunson
 6. How to explain the output
 Typical output fields:
 - Baseline prediction
-- Actual target
+- Actual target or estimated historical target
 - Recommended scheme
 - Scheme ranking
 - Top explanation rows
+- Source
 
 How to talk about them:
 - Baseline prediction: the model's predicted defensive outcome for the lineup
-- Actual target: the historical lineup defensive outcome from the dataset
+- Actual target: the true historical lineup defensive outcome when the exact lineup exists
+- Estimated historical target: a weighted estimate built from similar historical lineups when the exact lineup does not exist
 - Recommended scheme: the best simulated scheme under the current model and scheme profiles
 - Scheme ranking: all candidate schemes ordered from best to worst predicted result
 - Top explanation rows: the features and adjustments that most influenced the simulated recommendation
+- Source: tells you whether the lineup came from an exact historical match, a weighted overlap estimate, or a synthetic fallback
 
 7. Important target note
 The lineup target now comes from the advanced lineup API view whenever available.
@@ -73,8 +76,26 @@ If you see:
 that is the preferred case
 
 If you see:
+- Estimated historical target (weighted overlap)
+that means the exact 5-man lineup did not exist in the data and the target was estimated from similar historical lineups
+
+If you see:
 - Actual target (fallback per 48)
 that means the lineup row did not have a usable advanced defensive rating and the backup target was used
+
+If you see:
+- Source: exact_historical_lineup
+the demo found the true 5-man lineup in the dataset
+
+If you see:
+- Source: weighted_historical_overlap_4_plus
+- Source: weighted_historical_overlap_3
+- Source: weighted_historical_overlap_2
+the demo estimated the lineup from similar historical units with partial player overlap
+
+If you see:
+- Source: synthetic_player_profile
+the demo could not find useful historical lineup evidence and fell back to a player-profile-only lineup row
 
 8. Good one sentence explanation
 "The model predicts lineup defensive outcome from lineup composition and defensive play type features, then simulates how Drop, Switch, and Zone change that outcome and recommends the lowest risk option."
@@ -87,7 +108,8 @@ Why not call it a classifier?
 - Because the public NBA API does not provide true possession level scheme labels.
 
 Where is the heuristic?
-- In src/models/scheme_profiles.py.
+- Default fallback: src/models/scheme_profiles.py
+- Preferred runtime source when generated: data/processed/dynamic_scheme_profiles.json
 
 How does the recommendation work?
 - It adjusts the lineup features using scheme profiles, rescored each simulated scheme with the baseline model, and picks the lowest predicted defensive cost.
@@ -120,4 +142,3 @@ Fix:
 If you only have time for one check before presenting:
 
 python demo.py --players "Jalen Brunson" "Josh Hart" "Mikal Bridges" "OG Anunoby" "Karl-Anthony Towns"
-

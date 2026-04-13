@@ -1,29 +1,145 @@
-Project Proposal: Dynamic Lineup-Dependent Defensive Scheme Optimizer 
+Project Proposal: Dynamic Lineup-Dependent Defensive Scheme Optimizer
 By Gabriele Lisci (gl618) and Victor Olivo (vmo32)
 
-1. Problem Definition & Strategic Aspects Our project addresses the limitations of static defensive game-planning in the NBA. Currently, coaching staffs often rely on overall team averages or "gut feeling" to assign defensive coverages (e.g., Switch-All, Drop, 2-3 Zone), failing to account for the specific 5-man lineups currently on the floor or immediate situational directives (e.g., "Protect the Paint"). The problem is a lack of real-time, data-driven systems capable of instantly analyzing the specific five players on the court to recommend a defensively sound coverage under those constraints.
-Strategically, this project bridges core course concepts by combining advanced database management with predictive modeling. We will build an end-to-end pipeline that aggregates granular, individual play-type data using relational SQL databases and feeds it into a machine learning regression and simulation engine to output situational game-plan recommendations.
-2. Novelty, Importance, and Prior Work The importance of this project lies in its ability to optimize real-time decision-making in high-stakes environments. Exposing a weak defender or misaligning a coverage is heavily punished in the modern, highly-spaced NBA; optimizing these decisions can yield a measurable Expected Points Saved (EPS).
-Prior Work & Gap Identification: Existing sports analytics literature heavily covers pre-game outcome predictions (e.g., E.g., Predicting NBA Win Percentage, or standard Plus-Minus models). Additionally, while proprietary models exist within NBA front offices, public-facing analytics (like ESPN's BPI or 538's RAPTOR) focus on evaluating a player's past value rather than prescribing future schematic tactics. The literature lacks a dynamic, open-source recommendation engine that integrates live coaching directives (constraints) with real-time lineup data. Our project fills this gap by shifting from descriptive analytics to prescriptive, explainable AI.
-3. Course Relation to Lectures and Discussions: The project will show off key concepts from this course by demonstrating applications based on the teachings of the end-to-end data science pipeline, database setup, and predictive modeling. We will utilize the nba_api to acquire live defensive play-type data and lineup statistics, directly incorporating info from the lectures on data collection, API usage, and provenance (Week 05). As mentioned in the course, this raw JSON data will go through rigorous cleaning and transformation using Pandas. We will apply DataFrame operations and the split-apply-combine paradigm (Week 06) to handle missing values, filter out low-minute players, and aggregate individual metrics into cohesive 5-man lineup datasets.
-To manage and structure this data, a SQL database will be used, aligning exactly with what we’ve discussed regarding relational databases, schema design, and declarative thinking. We will use SQL Joins (Week 10) to connect our Player_Defense tables with our Lineup_Metrics tables to prepare the data for modeling. Finally, machine learning techniques taught in the latter half of the course will be utilized; specifically, we will build upon the teachings of predictive modeling and Decision Trees (Week 13) to build our ensemble model (XGBoost/Random Forest) for forecasting a lineup's defensive success and powering a defensive scheme simulation and recommendation engine.
+1. Problem Definition and Strategic Aspects
+
+Our project addresses the limitations of static defensive game-planning in the NBA. Coaching staffs often rely on overall team averages or informal judgment when choosing a coverage such as `Switch`, `Drop`, or `Zone`, without explicitly modeling the specific 5-man lineup on the floor. The practical problem is a lack of fast, data-driven support for recommending a defensively sound coverage for the exact lineup currently playing.
+
+The project combines database design, feature engineering, predictive modeling, and explainability into one end-to-end system. We aggregate player-level defensive play-type data and lineup-level defensive outcomes in a relational database, engineer lineup features, and feed those features into a machine-learning-assisted simulation and recommendation engine.
+
+2. Novelty, Importance, and Prior Work
+
+The project is important because modern NBA offenses punish weak links and schematic mismatches quickly. A lineup-aware system that estimates defensive risk and compares alternative coverages can support better tactical choices.
+
+Existing public basketball analytics work is mostly descriptive or predictive at the game and player level. Public models often focus on player value, win probability, or general team performance. They do not usually provide an open, lineup-specific recommendation layer for in-game defensive coverage.
+
+Our contribution is not a possession-level scheme classifier. The public NBA API does not expose labels that say a possession was defended in `Drop`, `Switch`, or `Zone`. Because of that, the project is framed more honestly as a lineup-aware defensive scheme simulator and recommendation engine. It predicts lineup defensive outcome from real data, then simulates how different candidate coverages may change that outcome.
+
+3. Relation to Course Material
+
+The project maps closely to the course pipeline:
+
+- API data collection with `nba_api`
+- JSON provenance and data cleaning with Pandas
+- relational schema design and SQL-style joins
+- feature engineering for model-ready tabular data
+- tree-based machine learning using XGBoost
+- explainability with SHAP
+
+The raw NBA API responses are stored for reproducibility, normalized into SQLite through SQLAlchemy, joined into lineup-level training rows, and then used in a baseline predictive model.
 
 4. Data Description and Accessibility
-Data Source & Accessibility: The data is 100% free, publicly accessible, and legally available via the open-source nba_api Python client, which queries the NBA's official stats database (stats.nba.com).
-Format: The raw data will be fetched in JSON format and processed into tabular Pandas DataFrames before being loaded into a structured SQL database.
-Features: The primary features include individual defensive Points Per Possession (PPP) allowed across distinct Synergy play-types (Isolation, Pick-and-Roll Ball Handler, Pick-and-Roll Roll Man, Spot-Up). The baseline target variable is the overall DEF_RATING (Defensive Points allowed per 100 possessions) of specific 5-man lineup combinations.
-Important limitation: the public NBA API does not provide possession-level defensive scheme labels such as Drop, Switch, or Zone. Because of that, our project is framed as a lineup-aware defensive scheme simulator and recommendation engine rather than a supervised defensive scheme classifier.
-5. Methodology & Implementation Plan Our implementation plan follows a structured, end-to-end data science lifecycle:
-Database Setup: We will design a relational SQL database utilizing JOINs and GROUP BYs to map individual Player_Defense metrics to Lineup_Metrics and Historical_Matchups.
-Model Selection: We will employ Tree-Based Models, specifically XGBoost (Extreme Gradient Boosting) or a Random Forest Regressor. These algorithms are selected because they excel at capturing non-linear relationships and feature interactions (e.g., how a center's poor perimeter defense interacts with a guard's high screen-navigation stats) better than standard linear regression.
-Simulation Layer: We will use defensive play-type metrics and lineup composition to define explicit scheme profiles that simulate how candidate coverages may shift expected defensive outcomes.
-Explainability: We will integrate SHAP (SHapley Additive exPlanations) values to translate the model's mathematical output into human-readable insights (e.g., explaining why the simulator preferred one scheme profile over another), satisfying the need for actionable intelligence.
-6. Evaluation Metrics and Success Criteria
-Predictive Accuracy: The model's baseline predictions will be evaluated using Mean Absolute Error (MAE) and Root Mean Squared Error (RMSE). We will compare our model's predicted Defensive Rating against actual historical lineup defensive outcomes in a holdout test dataset.
-Recommendation Success (Business Metric): The ultimate success metric is "Expected Points Saved." We will test whether the simulator's #1 suggested scheme produces a lower estimated opponent Points Per Possession than the alternative simulated schemes, and we will discuss the gap between simulated outcomes and true unlabeled in-game coverages as a limitation.
-References
-NBA.com Stats API. (2024). Retrieved from https://stats.nba.com
-Patel, S. (2024). nba_api: An API Client for www.nba.com. GitHub. https://github.com/swar/nba_api
-Synergy Sports Technology. (2024). Play-Type Defensive Tracking Data.
-Lundberg, S. M., & Lee, S. I. (2017). A Unified Approach to Interpreting Model Predictions (SHAP). Advances in Neural Information Processing Systems.
 
+Data source:
+
+- public NBA statistics endpoints accessed through the open-source `nba_api` client
+
+Raw format:
+
+- JSON responses from `stats.nba.com`
+
+Stored format:
+
+- normalized SQLite tables plus processed Pandas DataFrames and CSV exports
+
+Primary feature groups:
+
+- player defensive play-type PPP allowed for:
+  - `Isolation`
+  - `Pick and Roll Ball Handler`
+  - `Pick and Roll Roll Man`
+  - `Spot Up`
+- lineup composition features:
+  - guard, forward, and center counts
+  - average size measurements
+- lineup-level historical outcomes from the advanced lineup endpoint:
+  - `DEF_RATING`
+  - `PACE`
+  - `POSS`
+
+Primary target:
+
+- lineup `DEF_RATING`
+
+Important limitation:
+
+- the public NBA API does not provide true possession-level defensive scheme labels
+- because of that, the project cannot be trained as a supervised classifier of `Drop`, `Switch`, or `Zone`
+
+5. Methodology and Implementation Plan
+
+Database setup:
+
+- build a relational schema linking players, defensive play types, lineups, and lineup membership through a many-to-many association table
+
+Ingestion:
+
+- fetch player defense, Synergy defensive play types, and five-man lineup data
+- store raw snapshots under `data/raw/`
+- normalize the data into SQLite
+
+Feature engineering:
+
+- aggregate five-player defensive profiles into lineup-level rows
+- include size, position counts, and play-type PPP summaries
+- filter out unstable low-minute lineups and low-possession play-type samples
+
+Model selection:
+
+- use XGBoost as the baseline regressor because it handles nonlinear interactions well in tabular data
+
+Simulation layer:
+
+- score `Drop`, `Switch`, and `Zone` by adjusting lineup features through explicit scheme profiles
+- use data-driven dynamic scheme profiles when available, and hardcoded fallback profiles otherwise
+
+Player-input recommendation flow:
+
+1. user enters five players
+2. look for an exact historical lineup match
+3. if no exact match exists, estimate from weighted historical overlap
+4. if overlap evidence is weak, fall back to a synthetic player-profile lineup
+5. predict baseline defensive outcome
+6. rescore the lineup under each scheme
+7. recommend the lowest predicted defensive-cost option
+
+Explainability:
+
+- use SHAP values and explicit scheme adjustments to explain why one scheme was preferred over another
+
+6. Evaluation Metrics and Success Criteria
+
+Baseline predictive accuracy:
+
+- `MAE`
+- `RMSE`
+
+Recommendation success:
+
+- compare the simulated predicted defensive outcome for `Drop`, `Switch`, and `Zone`
+- success means the engine can return an interpretable ranked recommendation that is grounded in real lineup and play-type data
+
+Project success criteria:
+
+- live NBA ingestion works reliably enough to populate the database
+- the feature pipeline produces stable lineup rows
+- the baseline model predicts lineup defensive outcome reasonably well
+- the recommendation engine returns transparent, explainable coverage rankings for user-specified lineups
+
+7. Current Positioning Statement
+
+The correct description of the project is:
+
+- a lineup-aware defensive scheme simulator and recommendation engine
+
+It should not be described as:
+
+- a supervised defensive scheme classifier
+
+That distinction is central to the integrity of the project because of the public-data labeling limitation.
+
+References
+
+NBA.com Stats API. Retrieved from https://stats.nba.com
+Patel, S. `nba_api`: An API Client for `www.nba.com`. GitHub. https://github.com/swar/nba_api
+Lundberg, S. M., and Lee, S. I. A Unified Approach to Interpreting Model Predictions. Advances in Neural Information Processing Systems.

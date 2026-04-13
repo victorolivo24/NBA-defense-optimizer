@@ -6,7 +6,7 @@ import seaborn as sns
 from sklearn.model_selection import train_test_split
 
 from src.database.connection import DEFAULT_DATABASE_URL, create_session_factory
-from src.features import build_training_dataset
+from src.features import DEFAULT_MIN_LINEUP_MINUTES, build_training_dataset
 from src.models import (
     DEFAULT_TARGET_COLUMN,
     TARGET_OPTIONS,
@@ -39,7 +39,11 @@ if __name__ == "__main__":
     season = "2024-25"
     target_column = DEFAULT_TARGET_COLUMN
     session_factory = create_session_factory(DEFAULT_DATABASE_URL)
-    dataset = build_training_dataset(session_factory=session_factory, season=season)
+    dataset = build_training_dataset(
+        session_factory=session_factory,
+        season=season,
+        min_minutes=DEFAULT_MIN_LINEUP_MINUTES,
+    )
     artifacts = train_baseline_regressor(dataset=dataset, target_column=target_column)
 
     print(f"Target: {target_column}")

@@ -17,35 +17,44 @@ DEFAULT_PLAY_TYPES = [
     "Pick and Roll Roll Man",
     "Spot Up",
 ]
+DEFAULT_MIN_LINEUP_MINUTES = 10.0
+DEFAULT_MIN_PLAY_TYPE_POSSESSIONS = 10.0
 
 
 def build_training_dataset(
     session_factory,
     season: str,
     play_types: list[str] | None = None,
-    min_minutes: float = 0.0,
+    min_minutes: float = DEFAULT_MIN_LINEUP_MINUTES,
+    min_play_type_possessions: float = DEFAULT_MIN_PLAY_TYPE_POSSESSIONS,
 ) -> pd.DataFrame:
     """Build one model-ready row per lineup from the normalized database tables."""
     play_types = play_types or DEFAULT_PLAY_TYPES
 
     session = session_factory()
     try:
-        lineups = (
-            session.execute(
-                select(LineupMetric)
-                .where(LineupMetric.season == season)
-                .where((LineupMetric.minutes_played.is_(None)) | (LineupMetric.minutes_played >= min_minutes))
-                .options(
-                    selectinload(LineupMetric.players)
-                    .selectinload(LineupPlayer.player)
-                    .selectinload(Player.defensive_play_types)
-                )
+        statement = (
+            select(LineupMetric)
+            .where(LineupMetric.season == season)
+            .options(
+                selectinload(LineupMetric.players)
+                .selectinload(LineupPlayer.player)
+                .selectinload(Player.defensive_play_types)
             )
-            .scalars()
-            .all()
         )
+        if min_minutes > 0:
+            statement = statement.where(LineupMetric.minutes_played >= min_minutes)
 
-        rows = [_build_lineup_feature_row(lineup, play_types) for lineup in lineups]
+        lineups = session.execute(statement).scalars().all()
+
+        rows = [
+            _build_lineup_feature_row(
+                lineup,
+                play_types,
+                min_play_type_possessions=min_play_type_possessions,
+            )
+            for lineup in lineups
+        ]
         return pd.DataFrame(rows)
     finally:
         session.close()
@@ -56,7 +65,8 @@ def export_training_dataset(
     output_path: str = "data/processed/lineup_training_dataset.csv",
     database_url: str = DEFAULT_DATABASE_URL,
     play_types: list[str] | None = None,
-    min_minutes: float = 0.0,
+    min_minutes: float = DEFAULT_MIN_LINEUP_MINUTES,
+    min_play_type_possessions: float = DEFAULT_MIN_PLAY_TYPE_POSSESSIONS,
 ) -> Path:
     """Build the training dataset and write it to disk."""
     session_factory = create_session_factory(database_url)
@@ -65,6 +75,7 @@ def export_training_dataset(
         season=season,
         play_types=play_types,
         min_minutes=min_minutes,
+        min_play_type_possessions=min_play_type_possessions,
     )
 
     path = Path(output_path)
@@ -78,6 +89,7 @@ def build_synthetic_lineup_row(
     *,
     season: str,
     play_types: list[str] | None = None,
+    min_play_type_possessions: float = DEFAULT_MIN_PLAY_TYPE_POSSESSIONS,
     lineup_key: str | None = None,
     lineup_name: str | None = None,
     team_abbreviation: str | None = None,
@@ -95,6 +107,7 @@ def build_synthetic_lineup_row(
         players,
         play_types=play_types,
         season=season,
+        min_play_type_possessions=min_play_type_possessions,
         lineup_id=None,
         lineup_key=resolved_key,
         lineup_name=resolved_name,
@@ -106,13 +119,19 @@ def build_synthetic_lineup_row(
     )
 
 
-def _build_lineup_feature_row(lineup: LineupMetric, play_types: list[str]) -> dict[str, float | int | str | None]:
+def _build_lineup_feature_row(
+    lineup: LineupMetric,
+    play_types: list[str],
+    *,
+    min_play_type_possessions: float,
+) -> dict[str, float | int | str | None]:
     links = sorted(lineup.players, key=lambda link: link.slot)
     players = [link.player for link in links if link.player is not None]
     return _build_player_feature_row(
         players,
         play_types=play_types,
         season=lineup.season,
+        min_play_type_possessions=min_play_type_possessions,
         lineup_id=lineup.id,
         lineup_key=lineup.lineup_key,
         lineup_name=lineup.lineup_name,
@@ -129,6 +148,7 @@ def _build_player_feature_row(
     *,
     play_types: list[str],
     season: str,
+    min_play_type_possessions: float,
     lineup_id: int | None,
     lineup_key: str,
     lineup_name: str | None,
@@ -153,6 +173,11 @@ def _build_player_feature_row(
         "avg_height_inches": _mean([_height_to_inches(player.height) for player in players]),
         "avg_weight": _mean([player.weight for player in players]),
         "defensive_rating_target": defensive_rating,
+        "defensive_rating_target_source": _resolve_target_source(
+            defensive_rating=defensive_rating,
+            possessions=possessions,
+            minutes_played=minutes_played,
+        ),
         "opponent_ppp_target": opponent_ppp,
     }
 
@@ -163,7 +188,12 @@ def _build_player_feature_row(
         percentile_values = []
 
         for player in players:
-            match = _find_play_type_metric(player.defensive_play_types, play_type=play_type, season=season)
+            match = _find_play_type_metric(
+                player.defensive_play_types,
+                play_type=play_type,
+                season=season,
+                min_possessions=min_play_type_possessions,
+            )
             if match is None:
                 continue
             ppp_values.append(match.ppp_allowed)
@@ -186,9 +216,17 @@ def _find_play_type_metric(
     *,
     play_type: str,
     season: str,
+    min_possessions: float,
 ) -> DefensivePlayType | None:
     return next(
-        (metric for metric in metrics if metric.play_type == play_type and metric.season == season),
+        (
+            metric
+            for metric in metrics
+            if metric.play_type == play_type
+            and metric.season == season
+            and metric.possessions is not None
+            and metric.possessions >= min_possessions
+        ),
         None,
     )
 
@@ -227,6 +265,21 @@ def _resolve_team_abbreviation(players: list[Player]) -> str | None:
     if not teams:
         return None
     return "MIX"
+
+
+def _resolve_target_source(
+    *,
+    defensive_rating: float | None,
+    possessions: float | None,
+    minutes_played: float | None,
+) -> str | None:
+    if defensive_rating is None:
+        return None
+    if possessions is not None:
+        return "api_defensive_rating"
+    if minutes_played is not None:
+        return "fallback_points_allowed_per_48"
+    return "synthetic_no_actual_target"
 
 
 def _mean(values: list[float | int | None]) -> float | None:

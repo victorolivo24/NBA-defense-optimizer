@@ -25,6 +25,7 @@ def test_build_training_dataset_aggregates_lineup_features(tmp_path: Path):
     assert round(row["isolation_ppp_max"], 3) == 1.1
     assert round(row["spot_up_percentile_mean"], 1) == 67.0
     assert round(row["defensive_rating_target"], 1) == 108.4
+    assert row["defensive_rating_target_source"] == "api_defensive_rating"
 
 
 def test_build_training_dataset_respects_min_minutes_filter(tmp_path: Path):
@@ -33,6 +34,21 @@ def test_build_training_dataset_respects_min_minutes_filter(tmp_path: Path):
     dataset = build_training_dataset(session_factory, season="2024-25", min_minutes=40.0)
 
     assert dataset.empty
+
+
+def test_build_training_dataset_filters_low_possession_play_types(tmp_path: Path):
+    session_factory = _seed_feature_test_database(tmp_path)
+
+    dataset = build_training_dataset(
+        session_factory,
+        season="2024-25",
+        min_play_type_possessions=20.0,
+    )
+
+    row = dataset.iloc[0]
+    assert row["isolation_player_count"] == 2
+    assert round(row["isolation_ppp_mean"], 3) == 0.925
+    assert row["spot_up_player_count"] == 4
 
 
 def test_export_training_dataset_writes_csv(tmp_path: Path):

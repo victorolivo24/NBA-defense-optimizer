@@ -83,3 +83,66 @@ def test_train_baseline_regressor_returns_metrics():
     assert "mae" in artifacts.metrics
     assert "rmse" in artifacts.metrics
     assert len(artifacts.feature_columns) > 0
+
+
+def test_prepare_training_matrices_uses_median_imputation():
+    dataset = pd.DataFrame(
+        [
+            {
+                "lineup_key": "A",
+                "lineup_name": "Alpha",
+                "season": "2024-25",
+                "team_abbreviation": "AAA",
+                "minutes_played": 20.0,
+                "lineup_size": 5,
+                "guard_count": 2,
+                "avg_height_inches": 78.0,
+                "isolation_ppp_mean": 1.0,
+                "defensive_rating_target": 108.0,
+                "opponent_ppp_target": 1.08,
+            },
+            {
+                "lineup_key": "B",
+                "lineup_name": "Beta",
+                "season": "2024-25",
+                "team_abbreviation": "BBB",
+                "minutes_played": 22.0,
+                "lineup_size": 5,
+                "guard_count": 2,
+                "avg_height_inches": 79.0,
+                "isolation_ppp_mean": 2.0,
+                "defensive_rating_target": 109.0,
+                "opponent_ppp_target": 1.09,
+            },
+            {
+                "lineup_key": "C",
+                "lineup_name": "Gamma",
+                "season": "2024-25",
+                "team_abbreviation": "CCC",
+                "minutes_played": 24.0,
+                "lineup_size": 5,
+                "guard_count": 1,
+                "avg_height_inches": 80.0,
+                "isolation_ppp_mean": 100.0,
+                "defensive_rating_target": 110.0,
+                "opponent_ppp_target": 1.10,
+            },
+            {
+                "lineup_key": "D",
+                "lineup_name": "Delta",
+                "season": "2024-25",
+                "team_abbreviation": "DDD",
+                "minutes_played": 26.0,
+                "lineup_size": 5,
+                "guard_count": 1,
+                "avg_height_inches": 81.0,
+                "isolation_ppp_mean": None,
+                "defensive_rating_target": 111.0,
+                "opponent_ppp_target": 1.11,
+            },
+        ]
+    )
+
+    features, _ = prepare_training_matrices(dataset)
+
+    assert features.loc[3, "isolation_ppp_mean"] == 2.0

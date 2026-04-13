@@ -9,7 +9,7 @@ import pandas as pd
 from sklearn.metrics import mean_absolute_error, root_mean_squared_error
 from sklearn.model_selection import train_test_split
 
-from src.features import build_training_dataset
+from src.features import DEFAULT_MIN_LINEUP_MINUTES, build_training_dataset
 
 from .scheme_recommender import XGBoostSchemeRecommender
 
@@ -24,6 +24,7 @@ NON_FEATURE_COLUMNS = {
     "lineup_name",
     "season",
     "team_abbreviation",
+    "defensive_rating_target_source",
     "defensive_rating_target",
     "opponent_ppp_target",
 }
@@ -47,7 +48,7 @@ def build_model_dataset(
     session_factory,
     season: str,
     target_column: str = DEFAULT_TARGET_COLUMN,
-    min_minutes: float = 0.0,
+    min_minutes: float = DEFAULT_MIN_LINEUP_MINUTES,
 ) -> tuple[pd.DataFrame, pd.Series]:
     """Create the numeric feature matrix and target vector for baseline training."""
     if target_column not in TARGET_OPTIONS:
@@ -89,7 +90,7 @@ def prepare_training_matrices(
         raise ValueError("No numeric feature columns are available for model training.")
 
     features = pd.DataFrame(coerced_numeric_columns, index=filtered.index)
-    features = features.fillna(features.mean(numeric_only=True))
+    features = features.fillna(features.median(numeric_only=True))
     features = features.fillna(0.0)
     target = filtered[target_column].astype(float)
     return features, target

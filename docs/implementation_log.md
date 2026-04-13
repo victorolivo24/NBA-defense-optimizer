@@ -50,6 +50,7 @@ Current demo flow:
 Important display note:
 
 - when a historical lineup target came from the fallback formula instead of a possession-based defensive rating field, the demo should label it as `Actual target (fallback per 48)`
+- when a custom lineup is estimated from partial historical overlap instead of an exact 5-man match, the demo should label that number as `Estimated historical target (weighted overlap)`, not as a true actual target
 
 ## Inputs and Outputs
 

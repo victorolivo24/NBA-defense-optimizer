@@ -66,7 +66,8 @@ def test_build_default_case_studies_creates_distinct_labels():
     assert case_studies["lineup_key"].is_unique
 
 
-def test_format_demo_result_contains_recommendation_summary():
+def test_format_demo_result_contains_recommendation_summary(monkeypatch):
+    monkeypatch.setattr("src.demo.workflow.plot_recommendation_results", lambda result: "test_plot.png")
     recommendation = SchemeRecommendation(
         recommended_scheme="Switch",
         predicted_value=108.2,
@@ -102,6 +103,42 @@ def test_format_demo_result_contains_recommendation_summary():
     assert "Scheme ranking:" in formatted
     assert "Actual target (fallback per 48)" in formatted
     assert "Source: synthetic_player_profile" in formatted
+
+
+def test_format_demo_result_labels_weighted_overlap_target_as_estimate(monkeypatch):
+    monkeypatch.setattr("src.demo.workflow.plot_recommendation_results", lambda result: "test_plot.png")
+    recommendation = SchemeRecommendation(
+        recommended_scheme="Zone",
+        predicted_value=101.4,
+        ranked_schemes=pd.DataFrame(
+            [
+                {"scheme": "Zone", "predicted_value": 101.4},
+                {"scheme": "Drop", "predicted_value": 102.1},
+            ]
+        ),
+        explanation=pd.DataFrame(
+            [{"scheme": "Zone", "feature": "spot_up_ppp_mean", "adjustment": -0.04}]
+        ),
+    )
+    from src.demo.workflow import DemoResult
+
+    result = DemoResult(
+        case_label="Custom Lineup",
+        lineup_key="blend",
+        lineup_name="Jrue Holiday - Derrick White - Jaylen Brown - Jayson Tatum - Bam Adebayo",
+        team_abbreviation="MIX",
+        minutes_played=52.7,
+        actual_target=107.94,
+        actual_target_source="weighted_historical_overlap",
+        lineup_source="weighted_historical_overlap_4_plus",
+        baseline_prediction=101.49,
+        recommendation=recommendation,
+    )
+
+    formatted = format_demo_result(result)
+
+    assert "Estimated historical target (weighted overlap): 107.94" in formatted
+    assert "Actual target:" not in formatted
 
 
 def test_build_synthetic_lineup_row_aggregates_five_players():

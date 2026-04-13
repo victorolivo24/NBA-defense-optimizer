@@ -295,6 +295,8 @@ def format_demo_result(result: DemoResult, top_explanations: int = 5) -> str:
             target_label = "Actual target (fallback per 48)"
         elif result.actual_target_source == "api_defensive_rating":
             target_label = "Actual target (API defensive rating)"
+        elif result.actual_target_source == "weighted_historical_overlap":
+            target_label = "Estimated historical target (weighted overlap)"
         meta.append(f"{target_label}: {result.actual_target:.2f}")
     if result.lineup_source:
         meta.append(f"Source: {result.lineup_source}")

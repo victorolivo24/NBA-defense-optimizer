@@ -330,6 +330,14 @@ docs/implementation_log.md
 
 Use that file as the project study guide before presentations or interviews.
 
+## Demo Runbook
+
+For the short operator-facing demo steps and presentation commands, use:
+
+```text
+docs/demo_instructions.txt
+```
+
 ## Positioning Note
 
 This repository should be described as a lineup-aware defensive scheme simulator and recommendation engine, not as a supervised defensive scheme classifier.

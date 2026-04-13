@@ -1,0 +1,123 @@
+Dynamic Lineup Dependent Defensive Scheme Optimizer
+Demo Instructions
+
+Purpose
+This file is the quick runbook for presenting the project live.
+Use it when you need to run the system, explain the outputs, or recover from common setup issues.
+
+1. What the project does
+The project takes a five player lineup, predicts the lineup's defensive outcome, simulates candidate coverages, and recommends the best scheme among Drop, Switch, and Zone.
+
+Important wording:
+- This is a lineup aware defensive scheme simulator and recommendation engine.
+- It is not a supervised defensive scheme classifier.
+
+2. Setup
+From the repo root:
+
+pip install -r requirements.txt
+
+3. Full pipeline
+Run these in order if you need fresh data:
+
+python ingest.py
+python build_features.py
+python train_model.py
+
+What each step does:
+- ingest.py: pulls live NBA API data into SQLite and stores raw JSON snapshots
+- build_features.py: creates the lineup training dataset
+- train_model.py: trains the baseline XGBoost model and writes plots/feature importance
+
+4. Fastest live demo
+Use player input directly:
+
+python demo.py --players "Jalen Brunson" "Josh Hart" "Mikal Bridges" "OG Anunoby" "Karl-Anthony Towns"
+
+Other examples:
+
+python demo.py --players "Stephen Curry" "Brandin Podziemski" "Andrew Wiggins" "Draymond Green" "Kevon Looney"
+python demo.py --players "Jrue Holiday" "Derrick White" "Jaylen Brown" "Jayson Tatum" "Kristaps Porzingis"
+
+5. Historical lineup demo mode
+If you want to show existing lineups from the dataset instead of typing 5 players:
+
+python demo.py
+python demo.py --team BOS --limit 3
+python demo.py --search Brunson
+
+6. How to explain the output
+Typical output fields:
+- Baseline prediction
+- Actual target
+- Recommended scheme
+- Scheme ranking
+- Top explanation rows
+
+How to talk about them:
+- Baseline prediction: the model's predicted defensive outcome for the lineup
+- Actual target: the historical lineup defensive outcome from the dataset
+- Recommended scheme: the best simulated scheme under the current model and scheme profiles
+- Scheme ranking: all candidate schemes ordered from best to worst predicted result
+- Top explanation rows: the features and adjustments that most influenced the simulated recommendation
+
+7. Important target note
+The lineup target now comes from the advanced lineup API view whenever available.
+
+This means:
+- the project now uses real lineup DEF_RATING and POSS from the advanced endpoint
+- fallback points allowed per 48 is only a backup if the advanced view still fails
+
+If you see:
+- Actual target (API defensive rating)
+that is the preferred case
+
+If you see:
+- Actual target (fallback per 48)
+that means the lineup row did not have a usable advanced defensive rating and the backup target was used
+
+8. Good one sentence explanation
+"The model predicts lineup defensive outcome from lineup composition and defensive play type features, then simulates how Drop, Switch, and Zone change that outcome and recommends the lowest risk option."
+
+9. Good interview answers
+Why XGBoost?
+- It handles nonlinear interactions in tabular data better than a simple weighted formula.
+
+Why not call it a classifier?
+- Because the public NBA API does not provide true possession level scheme labels.
+
+Where is the heuristic?
+- In src/models/scheme_profiles.py.
+
+How does the recommendation work?
+- It adjusts the lineup features using scheme profiles, rescored each simulated scheme with the baseline model, and picks the lowest predicted defensive cost.
+
+10. Common issues
+Issue: NBA API blocks requests or times out
+Fix:
+- rerun later
+- keep the built in time.sleep delays
+- do not remove backoff logic
+
+Issue: a player name is not found
+Fix:
+- use the player's full name as stored in the NBA API
+- be more specific if the name is ambiguous
+
+Issue: the output has weird historical numbers
+Fix:
+- check whether the label says API defensive rating or fallback per 48
+- mention the source explicitly during the demo
+
+11. Files to know before a presentation
+- README.md
+- docs/implementation_log.md
+- docs/demo_instructions.txt
+- demo.py
+- src/models/scheme_profiles.py
+
+12. Best pre-demo command
+If you only have time for one check before presenting:
+
+python demo.py --players "Jalen Brunson" "Josh Hart" "Mikal Bridges" "OG Anunoby" "Karl-Anthony Towns"
+

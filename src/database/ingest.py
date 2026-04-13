@@ -80,7 +80,7 @@ def fetch_defensive_play_type_stats(config: IngestConfig) -> pd.DataFrame:
 
 
 def fetch_lineup_defense_stats(config: IngestConfig) -> pd.DataFrame:
-    """Fetch five-man lineup defense data with retry and backoff."""
+    """Fetch five-man lineup advanced defensive data with retry and backoff."""
     return _fetch_dataframe(
         endpoint_name="lineup_defense",
         endpoint_factory=leaguedashlineups.LeagueDashLineups,
@@ -88,7 +88,8 @@ def fetch_lineup_defense_stats(config: IngestConfig) -> pd.DataFrame:
             "season": config.season,
             "season_type_all_star": config.season_type,
             "per_mode_detailed": "PerGame",
-            "measure_type_detailed_defense": "Defense",
+            # Use the advanced lineup view so the API returns DEF_RATING, PACE, and POSS.
+            "measure_type_detailed_defense": "Advanced",
             "group_quantity": 5,
         },
         config=config,

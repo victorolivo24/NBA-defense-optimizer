@@ -32,7 +32,8 @@ def plot_actual_vs_predicted(y_true, y_pred, output_path: str = "data/processed/
     plt.legend()
     plt.tight_layout()
     plt.savefig(output_path, bbox_inches="tight")
-    plt.close()
+    plt.show(block=False)
+    plt.pause(2.0)
 
 
 if __name__ == "__main__":

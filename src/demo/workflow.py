@@ -237,7 +237,8 @@ def plot_recommendation_results(result: DemoResult, output_dir: str = "data/proc
     plt.legend()
     plt.tight_layout()
     plt.savefig(output_path, bbox_inches="tight")
-    plt.close()
+    plt.show(block=False)
+    plt.pause(2.0)
     
     return output_path
 

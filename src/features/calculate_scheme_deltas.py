@@ -10,6 +10,8 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 import pandas as pd
+import numpy as np
+from sklearn.cluster import KMeans
 from sqlalchemy import select
 
 from src.database.connection import DEFAULT_DATABASE_URL, create_session_factory
@@ -52,13 +54,15 @@ def calculate_drop_deltas(session, season: str) -> dict[str, float]:
     """
     df = _get_player_play_types(session, season)
     
-    # Proxy for Centers: Players with top 20% volume of Roll Man possessions
+    # Proxy for Centers: Players with high volume of Roll Man possessions (identified via clustering)
     roll_man_df = df[df['play_type'] == 'Pick and Roll Roll Man'].copy()
     if roll_man_df.empty:
         return {"pick_and_roll_roll_man_ppp_mean": 0.0, "pick_and_roll_ball_handler_ppp_mean": 0.0, "spot_up_ppp_mean": 0.0}
         
-    threshold = roll_man_df['possessions'].quantile(0.80)
-    big_ids = roll_man_df[roll_man_df['possessions'] >= threshold]['nba_player_id']
+    X = roll_man_df[['possessions']].values
+    kmeans = KMeans(n_clusters=2, random_state=42, n_init=10).fit(X)
+    high_volume_label = np.argmax(kmeans.cluster_centers_.flatten())
+    big_ids = roll_man_df[kmeans.labels_ == high_volume_label]['nba_player_id']
     
     bigs_df = df[df['nba_player_id'].isin(big_ids)]
     
@@ -101,8 +105,10 @@ def calculate_switch_deltas(session, season: str) -> dict[str, float]:
     if ball_handler_df.empty:
         return {"isolation_ppp_mean": 0.0, "pick_and_roll_ball_handler_ppp_mean": 0.0, "pick_and_roll_roll_man_ppp_mean": 0.0}
         
-    threshold = ball_handler_df['possessions'].quantile(0.60) # Top 40%
-    perimeter_ids = ball_handler_df[ball_handler_df['possessions'] >= threshold]['nba_player_id']
+    X = ball_handler_df[['possessions']].values
+    kmeans = KMeans(n_clusters=2, random_state=42, n_init=10).fit(X)
+    high_volume_label = np.argmax(kmeans.cluster_centers_.flatten())
+    perimeter_ids = ball_handler_df[kmeans.labels_ == high_volume_label]['nba_player_id']
     
     perimeter_df = df[df['nba_player_id'].isin(perimeter_ids)]
     
@@ -146,8 +152,10 @@ def calculate_zone_deltas(session_factory, season: str) -> dict[str, float]:
         return {"isolation_ppp_mean": -0.03, "spot_up_ppp_mean": 0.06, "spot_up_percentile_mean": -4.0}
         
     # High spot-up volume lineups are our proxy for zone
-    threshold = df['spot_up_possessions_mean'].quantile(0.85)
-    zone_proxies = df[df['spot_up_possessions_mean'] >= threshold]
+    X = df[['spot_up_possessions_mean']].values
+    kmeans = KMeans(n_clusters=2, random_state=42, n_init=10).fit(X)
+    high_volume_label = np.argmax(kmeans.cluster_centers_.flatten())
+    zone_proxies = df[kmeans.labels_ == high_volume_label]
     
     if zone_proxies.empty:
         return {"isolation_ppp_mean": -0.03, "spot_up_ppp_mean": 0.06, "spot_up_percentile_mean": -4.0}

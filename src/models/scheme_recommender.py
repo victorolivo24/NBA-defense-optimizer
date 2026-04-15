@@ -5,6 +5,7 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 import pandas as pd
 import shap
+from sklearn.model_selection import GridSearchCV
 from xgboost import XGBRegressor
 
 from .base import BaseSchemeModel
@@ -22,11 +23,6 @@ class XGBoostSchemeRecommender(BaseSchemeModel):
 
     def __init__(self) -> None:
         self.model = XGBRegressor(
-            n_estimators=200,
-            max_depth=4,
-            learning_rate=0.05,
-            subsample=0.9,
-            colsample_bytree=0.9,
             objective="reg:squarederror",
             random_state=42,
         )
@@ -34,7 +30,23 @@ class XGBoostSchemeRecommender(BaseSchemeModel):
 
     def fit(self, features: pd.DataFrame, target: pd.Series) -> None:
         self.feature_names = list(features.columns)
-        self.model.fit(features, target)
+        param_grid = {
+            'n_estimators': [100, 200],
+            'max_depth': [3, 4, 5],
+            'learning_rate': [0.01, 0.05, 0.1],
+            'subsample': [0.8, 0.9],
+            'colsample_bytree': [0.8, 0.9],
+        }
+        grid_search = GridSearchCV(
+            estimator=self.model,
+            param_grid=param_grid,
+            scoring='neg_mean_squared_error',
+            cv=3,
+            n_jobs=-1,
+            verbose=1
+        )
+        grid_search.fit(features, target)
+        self.model = grid_search.best_estimator_
 
     def predict(self, features: pd.DataFrame):
         return self.model.predict(features)
@@ -57,9 +69,10 @@ class XGBoostSchemeRecommender(BaseSchemeModel):
         """Generate and save a SHAP summary plot."""
         explainer = shap.TreeExplainer(self.model)
         shap_values = explainer.shap_values(features)
-        
+
         plt.figure(figsize=(10, 6))
         shap.summary_plot(shap_values, features, show=False)
         plt.tight_layout()
         plt.savefig(output_path, bbox_inches="tight")
-        plt.close()
+        plt.show(block=False)
+        plt.pause(2.0)

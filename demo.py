@@ -100,3 +100,7 @@ if __name__ == "__main__":
     for result in run_demo_for_lineups(selected, artifacts, case_label_column=case_label_column, scheme_profiles=dynamic_profiles):
         print(format_demo_result(result))
         print("\n" + "=" * 80 + "\n")
+
+    import matplotlib.pyplot as plt
+    print("Keeping plots open. Close all plot windows to exit.")
+    plt.show(block=True)

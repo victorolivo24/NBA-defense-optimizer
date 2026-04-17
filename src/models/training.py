@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
-from sklearn.metrics import mean_absolute_error, root_mean_squared_error
+from sklearn.metrics import mean_absolute_error, root_mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
 
 from src.features import DEFAULT_MIN_LINEUP_MINUTES, build_training_dataset
@@ -27,6 +27,8 @@ NON_FEATURE_COLUMNS = {
     "defensive_rating_target_source",
     "defensive_rating_target",
     "opponent_ppp_target",
+    "possessions",
+    "minutes_played",
 }
 
 
@@ -49,8 +51,8 @@ def build_model_dataset(
     season: str,
     target_column: str = DEFAULT_TARGET_COLUMN,
     min_minutes: float = DEFAULT_MIN_LINEUP_MINUTES,
-) -> tuple[pd.DataFrame, pd.Series]:
-    """Create the numeric feature matrix and target vector for baseline training."""
+) -> tuple[pd.DataFrame, pd.Series, pd.Series]:
+    """Create the numeric feature matrix, target vector, and weights for baseline training."""
     if target_column not in TARGET_OPTIONS:
         raise ValueError(
             f"Unsupported target column '{target_column}'. Expected one of: {sorted(TARGET_OPTIONS)}"
@@ -67,14 +69,22 @@ def build_model_dataset(
 def prepare_training_matrices(
     dataset: pd.DataFrame,
     target_column: str = DEFAULT_TARGET_COLUMN,
-) -> tuple[pd.DataFrame, pd.Series]:
-    """Convert the engineered lineup dataset into numeric features and a target series."""
+    weight_column: str = "possessions",
+) -> tuple[pd.DataFrame, pd.Series, pd.Series]:
+    """Convert the engineered lineup dataset into numeric features, a target series, and weights."""
     if target_column not in dataset.columns:
         raise ValueError(f"Target column '{target_column}' is not present in the dataset.")
 
     filtered = dataset.dropna(subset=[target_column]).copy()
     if filtered.empty:
         raise ValueError(f"No rows remain after dropping null values for '{target_column}'.")
+
+    if weight_column in filtered.columns and filtered[weight_column].notna().any():
+        weights = filtered[weight_column].fillna(1.0).astype(float)
+    elif "minutes_played" in filtered.columns and filtered["minutes_played"].notna().any():
+        weights = filtered["minutes_played"].fillna(1.0).astype(float)
+    else:
+        weights = pd.Series(1.0, index=filtered.index)
 
     coerced_numeric_columns: dict[str, pd.Series] = {}
     for column in filtered.columns:
@@ -93,7 +103,7 @@ def prepare_training_matrices(
     features = features.fillna(features.median(numeric_only=True))
     features = features.fillna(0.0)
     target = filtered[target_column].astype(float)
-    return features, target
+    return features, target, weights
 
 
 def train_baseline_regressor(
@@ -103,24 +113,31 @@ def train_baseline_regressor(
     random_state: int = 42,
 ) -> TrainingArtifacts:
     """Train and evaluate the baseline XGBoost regressor on the engineered lineup dataset."""
-    features, target = prepare_training_matrices(dataset, target_column=target_column)
+    features, target, weights = prepare_training_matrices(dataset, target_column=target_column)
     if len(features) < 4:
         raise ValueError("At least 4 rows are required to train and evaluate the baseline model.")
 
-    x_train, x_test, y_train, y_test = train_test_split(
+    x_train, x_test, y_train, y_test, w_train, w_test = train_test_split(
         features,
         target,
+        weights,
         test_size=test_size,
         random_state=random_state,
     )
 
     model = XGBoostSchemeRecommender()
-    model.fit(x_train, y_train)
+    model.fit(x_train, y_train, sample_weight=w_train)
+    
+    train_predictions = model.predict(x_train)
     predictions = model.predict(x_test)
 
     metrics = {
-        "mae": float(mean_absolute_error(y_test, predictions)),
-        "rmse": float(root_mean_squared_error(y_test, predictions)),
+        "train_mae": float(mean_absolute_error(y_train, train_predictions)),
+        "train_rmse": float(root_mean_squared_error(y_train, train_predictions)),
+        "train_r2": float(r2_score(y_train, train_predictions)),
+        "test_mae": float(mean_absolute_error(y_test, predictions)),
+        "test_rmse": float(root_mean_squared_error(y_test, predictions)),
+        "test_r2": float(r2_score(y_test, predictions)),
     }
 
     # Use 5th and 95th percentiles for robust scaling (ignoring outliers)

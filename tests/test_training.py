@@ -35,10 +35,9 @@ def test_prepare_training_matrices_selects_numeric_feature_columns():
         ]
     )
 
-    features, target = prepare_training_matrices(dataset)
+    features, target, _ = prepare_training_matrices(dataset)
 
     assert list(features.columns) == [
-        "minutes_played",
         "lineup_size",
         "guard_count",
         "avg_height_inches",
@@ -80,8 +79,8 @@ def test_train_baseline_regressor_returns_metrics():
     assert artifacts.target_column == "defensive_rating_target"
     assert artifacts.train_rows > 0
     assert artifacts.test_rows > 0
-    assert "mae" in artifacts.metrics
-    assert "rmse" in artifacts.metrics
+    assert "train_mae" in artifacts.metrics
+    assert "train_rmse" in artifacts.metrics
     assert len(artifacts.feature_columns) > 0
 
 
@@ -143,6 +142,7 @@ def test_prepare_training_matrices_uses_median_imputation():
         ]
     )
 
-    features, _ = prepare_training_matrices(dataset)
+    features, _, _ = prepare_training_matrices(dataset)
 
     assert features.loc[3, "isolation_ppp_mean"] == 2.0
+0

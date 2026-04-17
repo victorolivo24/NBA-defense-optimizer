@@ -1,6 +1,19 @@
 import runpy
 import sys
+import subprocess
 import matplotlib.pyplot as plt
+
+def install_requirements():
+    """Install dependencies from requirements.txt."""
+    print(f"\n{'='*50}")
+    print("Installing requirements.txt...")
+    print(f"{'='*50}")
+    try:
+        subprocess.run([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"], check=True)
+        print("Requirements installed successfully.\n")
+    except subprocess.CalledProcessError as e:
+        print(f"Error installing requirements: {e}")
+        sys.exit(1)
 
 def run_script(script_name: str):
     """Run a python script and return its completion status."""
@@ -19,6 +32,8 @@ def run_script(script_name: str):
 
 def main():
     print("Starting NBA Defensive Scheme Optimizer Pipeline...")
+    
+    install_requirements()
     
     scripts = [
         "ingest.py",

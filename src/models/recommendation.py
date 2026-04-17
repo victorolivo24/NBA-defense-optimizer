@@ -28,7 +28,7 @@ def recommend_scheme(
     """Simulate candidate defensive schemes for a lineup and return the best option."""
     scheme_profiles = scheme_profiles or DEFAULT_SCHEME_PROFILES
     lineup_frame = _coerce_lineup_frame(lineup_row)
-    base_features, _ = prepare_training_matrices(
+    base_features, _, _ = prepare_training_matrices(
         _ensure_targets_exist(lineup_frame),
         target_column=artifacts.target_column,
     )

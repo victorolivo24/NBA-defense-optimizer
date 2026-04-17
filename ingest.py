@@ -4,4 +4,6 @@ from src.database.ingest import IngestConfig, run_ingestion
 
 
 if __name__ == "__main__":
-    run_ingestion(IngestConfig())
+    seasons = ["2022-23", "2023-24", "2024-25"]
+    for season in seasons:
+        run_ingestion(IngestConfig(season=season))

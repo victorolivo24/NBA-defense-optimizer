@@ -210,13 +210,13 @@ def plot_recommendation_results(result: DemoResult, output_dir: str = "data/proc
     output_path = os.path.join(output_dir, f"recommendation_{safe_name}.png")
 
     df = result.recommendation.ranked_schemes
-    
+
     plt.figure(figsize=(8, 5))
     ax = sns.barplot(x="scheme", y="predicted_value", data=df, hue="scheme", palette="viridis", legend=False)
-    
+
     # Add actual baseline if it exists as a baseline line
     plt.axhline(y=result.baseline_prediction, color='r', linestyle='--', label=f'Baseline ({result.baseline_prediction:.1f})')
-    
+
     # Add labels on top of bars
     for i, p in enumerate(ax.patches):
         ax.annotate(
@@ -239,7 +239,7 @@ def plot_recommendation_results(result: DemoResult, output_dir: str = "data/proc
     plt.savefig(output_path, bbox_inches="tight")
     plt.show(block=False)
     plt.pause(2.0)
-    
+
     return output_path
 
 
@@ -335,7 +335,7 @@ def _predict_baseline(lineup_row: pd.Series, artifacts: TrainingArtifacts) -> fl
             lineup_frame[other_target],
             errors="coerce",
         ).fillna(0.0)
-    features, _ = prepare_training_matrices(lineup_frame, target_column=artifacts.target_column)
+    features, _, _ = prepare_training_matrices(lineup_frame, target_column=artifacts.target_column)
     features = features.reindex(columns=artifacts.feature_columns, fill_value=0.0)
     return float(artifacts.model.predict(features)[0])
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -17,8 +18,38 @@ DEFAULT_PLAY_TYPES = [
     "Pick and Roll Roll Man",
     "Spot Up",
 ]
-DEFAULT_MIN_LINEUP_MINUTES = 10.0
+DEFAULT_MIN_LINEUP_MINUTES = 25.0
+DEFAULT_MIN_LINEUP_POSSESSIONS = 50.0
 DEFAULT_MIN_PLAY_TYPE_POSSESSIONS = 10.0
+
+_PLAYER_DEF_RATINGS_CACHE: dict[str, dict[str, float]] | None = None
+
+def _get_player_def_ratings(season: str) -> dict[str, float]:
+    global _PLAYER_DEF_RATINGS_CACHE
+    if _PLAYER_DEF_RATINGS_CACHE is None:
+        path = Path("data/processed/player_def_ratings.json")
+        if path.exists():
+            try:
+                # the file is now {"season": {"player_id": rating}}
+                # or maybe just {"player_id": rating} if it's old.
+                # If it's old format, it won't have the season key, but we handle it.
+                data = json.loads(path.read_text())
+                if data and not any(k.count("-") == 1 for k in list(data.keys())[:5] if isinstance(k, str)):
+                     # Attempt to be robust if it's still old data, though ingest should overwrite it
+                     pass
+                _PLAYER_DEF_RATINGS_CACHE = data
+            except json.JSONDecodeError:
+                _PLAYER_DEF_RATINGS_CACHE = {}
+        else:
+            _PLAYER_DEF_RATINGS_CACHE = {}
+            
+    # Handle the transition from old format to new format gracefully
+    # If the root keys are seasons like "2024-25", return that season's mapping
+    if season in _PLAYER_DEF_RATINGS_CACHE:
+        return _PLAYER_DEF_RATINGS_CACHE[season]
+    
+    # Otherwise return empty mapping
+    return _PLAYER_DEF_RATINGS_CACHE.get(season, {})
 
 
 def build_training_dataset(
@@ -26,6 +57,7 @@ def build_training_dataset(
     season: str,
     play_types: list[str] | None = None,
     min_minutes: float = DEFAULT_MIN_LINEUP_MINUTES,
+    min_possessions: float = DEFAULT_MIN_LINEUP_POSSESSIONS,
     min_play_type_possessions: float = DEFAULT_MIN_PLAY_TYPE_POSSESSIONS,
 ) -> pd.DataFrame:
     """Build one model-ready row per lineup from the normalized database tables."""
@@ -44,6 +76,8 @@ def build_training_dataset(
         )
         if min_minutes > 0:
             statement = statement.where(LineupMetric.minutes_played >= min_minutes)
+        if min_possessions > 0:
+            statement = statement.where(LineupMetric.possessions >= min_possessions)
 
         lineups = session.execute(statement).scalars().all()
 
@@ -61,26 +95,35 @@ def build_training_dataset(
 
 
 def export_training_dataset(
-    season: str,
+    season: str | list[str],
     output_path: str = "data/processed/lineup_training_dataset.csv",
     database_url: str = DEFAULT_DATABASE_URL,
     play_types: list[str] | None = None,
     min_minutes: float = DEFAULT_MIN_LINEUP_MINUTES,
+    min_possessions: float = DEFAULT_MIN_LINEUP_POSSESSIONS,
     min_play_type_possessions: float = DEFAULT_MIN_PLAY_TYPE_POSSESSIONS,
 ) -> Path:
     """Build the training dataset and write it to disk."""
     session_factory = create_session_factory(database_url)
-    dataset = build_training_dataset(
-        session_factory=session_factory,
-        season=season,
-        play_types=play_types,
-        min_minutes=min_minutes,
-        min_play_type_possessions=min_play_type_possessions,
-    )
+    
+    seasons_list = [season] if isinstance(season, str) else season
+    datasets = []
+    for s in seasons_list:
+        dataset = build_training_dataset(
+            session_factory=session_factory,
+            season=s,
+            play_types=play_types,
+            min_minutes=min_minutes,
+            min_possessions=min_possessions,
+            min_play_type_possessions=min_play_type_possessions,
+        )
+        datasets.append(dataset)
+        
+    final_dataset = pd.concat(datasets, ignore_index=True)
 
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    dataset.to_csv(path, index=False)
+    final_dataset.to_csv(path, index=False)
     return path
 
 
@@ -158,6 +201,17 @@ def _build_player_feature_row(
     defensive_rating: float | None,
     opponent_ppp: float | None,
 ) -> dict[str, float | int | str | None]:
+    ratings_map = _get_player_def_ratings(season)
+    def_ratings = []
+    for player in players:
+        pid_str = str(player.nba_player_id)
+        rating = ratings_map.get(pid_str, 115.0)
+        def_ratings.append(rating)
+        
+    avg_rating = _mean(def_ratings) if def_ratings else 115.0
+    best_rating = min(def_ratings) if def_ratings else 115.0
+    worst_rating = max(def_ratings) if def_ratings else 115.0
+
     row: dict[str, float | int | str | None] = {
         "lineup_id": lineup_id,
         "lineup_key": lineup_key,
@@ -179,6 +233,9 @@ def _build_player_feature_row(
             minutes_played=minutes_played,
         ),
         "opponent_ppp_target": opponent_ppp,
+        "avg_player_def_rtg": avg_rating,
+        "best_player_def_rtg": best_rating,
+        "worst_player_def_rtg": worst_rating,
     }
 
     for play_type in play_types:
@@ -301,3 +358,5 @@ def _max(values: list[float | int | None]) -> float | None:
     if not filtered:
         return None
     return max(filtered)
+
+

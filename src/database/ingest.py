@@ -55,6 +55,21 @@ def fetch_player_defense_stats(config: IngestConfig) -> pd.DataFrame:
     )
 
 
+def fetch_player_advanced_defense_stats(config: IngestConfig) -> pd.DataFrame:
+    """Fetch advanced player defense stats with retry and backoff."""
+    return _fetch_dataframe(
+        endpoint_name="player_advanced_defense",
+        endpoint_factory=leaguedashplayerstats.LeagueDashPlayerStats,
+        endpoint_kwargs={
+            "season": config.season,
+            "season_type_all_star": config.season_type,
+            "per_mode_detailed": "PerGame",
+            "measure_type_detailed_defense": "Advanced",
+        },
+        config=config,
+    )
+
+
 def fetch_defensive_play_type_stats(config: IngestConfig) -> pd.DataFrame:
     """Fetch defensive play-type data with the supported Synergy endpoint arguments."""
     frames: list[pd.DataFrame] = []
@@ -259,6 +274,32 @@ def run_ingestion(config: IngestConfig | None = None) -> None:
     LOGGER.info("Fetching player defense stats for %s.", config.season)
     players_df = fetch_player_defense_stats(config)
     upsert_players(session_factory, players_df)
+
+    LOGGER.info("Fetching player advanced defense stats for %s.", config.season)
+    try:
+        advanced_df = fetch_player_advanced_defense_stats(config)
+        mapping = {}
+        for row in advanced_df.to_dict(orient="records"):
+            pid = _safe_int(row.get("PLAYER_ID"))
+            def_rtg = _safe_float(row.get("DEF_RATING"))
+            if pid is not None and def_rtg is not None:
+                mapping[str(pid)] = def_rtg
+        
+        out_path = Path("data/processed/player_def_ratings.json")
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        all_mappings = {}
+        if out_path.exists():
+            try:
+                all_mappings = json.loads(out_path.read_text())
+            except json.JSONDecodeError:
+                pass
+                
+        all_mappings[config.season] = mapping
+        out_path.write_text(json.dumps(all_mappings, indent=2))
+        LOGGER.info("Saved player def ratings mapping to %s", out_path)
+    except Exception as exc:
+        LOGGER.warning("Advanced player stats ingestion failed: %s", exc)
 
     LOGGER.info("Fetching defensive play-type stats for %s.", config.season)
     try:

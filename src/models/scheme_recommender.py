@@ -5,7 +5,7 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 import pandas as pd
 import shap
-from sklearn.model_selection import GridSearchCV
+from sklearn.model_selection import RandomizedSearchCV
 from xgboost import XGBRegressor
 
 from .base import BaseSchemeModel
@@ -28,25 +28,40 @@ class XGBoostSchemeRecommender(BaseSchemeModel):
         )
         self.feature_names: list[str] = []
 
-    def fit(self, features: pd.DataFrame, target: pd.Series) -> None:
+    def fit(self, features: pd.DataFrame, target: pd.Series, sample_weight: pd.Series | None = None) -> None:
         self.feature_names = list(features.columns)
+        
         param_grid = {
-            'n_estimators': [100, 200],
-            'max_depth': [3, 4, 5],
-            'learning_rate': [0.01, 0.05, 0.1],
-            'subsample': [0.8, 0.9],
-            'colsample_bytree': [0.8, 0.9],
+            "max_depth": [2, 3, 4],
+            "min_child_weight": [1, 3, 5],
+            "learning_rate": [0.01, 0.05, 0.1],
+            "reg_alpha": [1, 5, 10],
+            "reg_lambda": [1, 5, 10],
+            "n_estimators": [50, 100, 150],
+            "subsample": [0.5, 0.7],
+            "colsample_bytree": [0.5, 0.8],
         }
-        grid_search = GridSearchCV(
-            estimator=self.model,
-            param_grid=param_grid,
-            scoring='neg_mean_squared_error',
-            cv=3,
-            n_jobs=-1,
-            verbose=1
+        
+        base_model = XGBRegressor(
+            objective="reg:squarederror",
+            random_state=42,
         )
-        grid_search.fit(features, target)
-        self.model = grid_search.best_estimator_
+        
+        search = RandomizedSearchCV(
+            estimator=base_model,
+            param_distributions=param_grid,
+            n_iter=30,
+            cv=5,
+            scoring="neg_root_mean_squared_error",
+            n_jobs=-1,
+            random_state=42,
+        )
+        
+        if sample_weight is not None:
+            search.fit(features, target, sample_weight=sample_weight)
+        else:
+            search.fit(features, target)
+        self.model = search.best_estimator_
 
     def predict(self, features: pd.DataFrame):
         return self.model.predict(features)

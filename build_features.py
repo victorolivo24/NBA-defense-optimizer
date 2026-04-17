@@ -5,7 +5,7 @@ from src.features import DEFAULT_MIN_LINEUP_MINUTES, DEFAULT_MIN_PLAY_TYPE_POSSE
 
 if __name__ == "__main__":
     output_path = export_training_dataset(
-        season="2024-25",
+        season=["2022-23", "2023-24", "2024-25"],
         min_minutes=DEFAULT_MIN_LINEUP_MINUTES,
         min_play_type_possessions=DEFAULT_MIN_PLAY_TYPE_POSSESSIONS,
     )

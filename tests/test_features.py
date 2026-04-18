@@ -21,9 +21,9 @@ def test_build_training_dataset_aggregates_lineup_features(tmp_path: Path):
     assert row["avg_height_inches"] == 78.0
     assert row["avg_weight"] == 221.0
     assert row["isolation_player_count"] == 5
-    assert round(row["isolation_ppp_mean"], 3) == 0.98
+    assert round(row["isolation_ppp_mean"], 3) == 0.974
     assert round(row["isolation_ppp_max"], 3) == 1.1
-    assert round(row["spot_up_percentile_mean"], 1) == 67.0
+    assert round(row["spot_up_percentile_mean"], 1) == 67.4
     assert round(row["defensive_rating_target"], 1) == 108.4
     assert row["defensive_rating_target_source"] == "api_defensive_rating"
 
@@ -47,7 +47,7 @@ def test_build_training_dataset_filters_low_possession_play_types(tmp_path: Path
 
     row = dataset.iloc[0]
     assert row["isolation_player_count"] == 2
-    assert round(row["isolation_ppp_mean"], 3) == 0.925
+    assert round(row["isolation_ppp_mean"], 3) == 0.926
     assert row["spot_up_player_count"] == 4
 
 

@@ -11,7 +11,7 @@ from sklearn.model_selection import train_test_split
 
 from src.features import DEFAULT_MIN_LINEUP_MINUTES, build_training_dataset
 
-from .scheme_recommender import XGBoostSchemeRecommender
+from .scheme_recommender import LinearSchemeRecommender
 
 DEFAULT_TARGET_COLUMN = "defensive_rating_target"
 TARGET_OPTIONS = {
@@ -36,7 +36,7 @@ NON_FEATURE_COLUMNS = {
 class TrainingArtifacts:
     """Container for the trained model, selected features, and evaluation metrics."""
 
-    model: XGBoostSchemeRecommender
+    model: LinearSchemeRecommender
     target_column: str
     feature_columns: list[str]
     metrics: dict[str, float]
@@ -44,6 +44,7 @@ class TrainingArtifacts:
     test_rows: int
     feature_mins: dict[str, float] | None = None
     feature_maxs: dict[str, float] | None = None
+    feature_means: dict[str, float] | None = None
 
 
 def build_model_dataset(
@@ -112,7 +113,7 @@ def train_baseline_regressor(
     test_size: float = 0.25,
     random_state: int = 42,
 ) -> TrainingArtifacts:
-    """Train and evaluate the baseline XGBoost regressor on the engineered lineup dataset."""
+    """Train and evaluate the baseline linear regressor on the engineered lineup dataset."""
     features, target, weights = prepare_training_matrices(dataset, target_column=target_column)
     if len(features) < 4:
         raise ValueError("At least 4 rows are required to train and evaluate the baseline model.")
@@ -125,7 +126,7 @@ def train_baseline_regressor(
         random_state=random_state,
     )
 
-    model = XGBoostSchemeRecommender()
+    model = LinearSchemeRecommender()
     model.fit(x_train, y_train, sample_weight=w_train)
     
     train_predictions = model.predict(x_train)
@@ -143,6 +144,7 @@ def train_baseline_regressor(
     # Use 5th and 95th percentiles for robust scaling (ignoring outliers)
     feature_mins = features.quantile(0.05).to_dict()
     feature_maxs = features.quantile(0.95).to_dict()
+    feature_means = features.mean(numeric_only=True).to_dict()
 
     return TrainingArtifacts(
         model=model,
@@ -153,6 +155,7 @@ def train_baseline_regressor(
         test_rows=len(x_test),
         feature_mins=feature_mins,
         feature_maxs=feature_maxs,
+        feature_means=feature_means,
     )
 
 

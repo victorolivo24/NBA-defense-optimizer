@@ -258,11 +258,11 @@ def _build_player_feature_row(
             percentile_values.append(match.percentile)
 
         row[f"{normalized_name}_player_count"] = len(ppp_values)
-        row[f"{normalized_name}_ppp_mean"] = _mean(ppp_values)
+        row[f"{normalized_name}_ppp_mean"] = _weighted_mean(ppp_values, possession_values)
         row[f"{normalized_name}_ppp_min"] = _min(ppp_values)
         row[f"{normalized_name}_ppp_max"] = _max(ppp_values)
         row[f"{normalized_name}_possessions_mean"] = _mean(possession_values)
-        row[f"{normalized_name}_percentile_mean"] = _mean(percentile_values)
+        row[f"{normalized_name}_percentile_mean"] = _weighted_mean(percentile_values, possession_values)
         row[f"{normalized_name}_percentile_min"] = _min(percentile_values)
 
     return row
@@ -344,6 +344,25 @@ def _mean(values: list[float | int | None]) -> float | None:
     if not filtered:
         return None
     return sum(filtered) / len(filtered)
+
+
+def _weighted_mean(
+    values: list[float | int | None],
+    weights: list[float | int | None],
+) -> float | None:
+    pairs = [
+        (float(value), float(weight))
+        for value, weight in zip(values, weights, strict=False)
+        if value is not None and weight is not None
+    ]
+    if not pairs:
+        return _mean(values)
+
+    total_weight = sum(weight for _, weight in pairs)
+    if total_weight <= 0:
+        return _mean(values)
+
+    return sum(value * weight for value, weight in pairs) / total_weight
 
 
 def _min(values: list[float | int | None]) -> float | None:

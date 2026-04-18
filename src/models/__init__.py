@@ -6,7 +6,7 @@ from .recommendation import (
     apply_scheme_profile,
     recommend_scheme,
 )
-from .scheme_recommender import XGBoostSchemeRecommender
+from .scheme_recommender import LinearSchemeRecommender
 from .scheme_profiles import DEFAULT_SCHEME_PROFILES
 from .training import (
     DEFAULT_TARGET_COLUMN,
@@ -20,7 +20,7 @@ from .training import (
 
 __all__ = [
     "BaseSchemeModel",
-    "XGBoostSchemeRecommender",
+    "LinearSchemeRecommender",
     "DEFAULT_SCHEME_PROFILES",
     "DEFAULT_TARGET_COLUMN",
     "SchemeRecommendation",

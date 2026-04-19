@@ -9,6 +9,8 @@ import pandas as pd
 from .scheme_profiles import DEFAULT_SCHEME_PROFILES
 from .training import TrainingArtifacts, prepare_training_matrices
 
+SCHEME_FIT_WEIGHT = 6.0
+
 
 @dataclass
 class SchemeRecommendation:
@@ -39,11 +41,19 @@ def recommend_scheme(
 
     for scheme_name, adjustments in scheme_profiles.items():
         scenario_features = apply_scheme_profile(base_features, adjustments, artifacts)
-        prediction = float(artifacts.model.predict(scenario_features)[0])
+        model_prediction = float(artifacts.model.predict(scenario_features)[0])
+        scheme_fit_adjustment = calculate_scheme_fit_adjustment(
+            base_features=base_features,
+            adjustments=adjustments,
+            artifacts=artifacts,
+        )
+        prediction = model_prediction - scheme_fit_adjustment
         scored_rows.append(
             {
                 "scheme": scheme_name,
                 "predicted_value": prediction,
+                "model_prediction": model_prediction,
+                "scheme_fit_adjustment": scheme_fit_adjustment,
             }
         )
 
@@ -113,43 +123,93 @@ def apply_scheme_profile(
     for feature_name, delta in adjustments.items():
         if feature_name not in adjusted.columns:
             continue
-            
-        if artifacts and hasattr(artifacts, 'feature_mins') and hasattr(artifacts, 'feature_maxs') and artifacts.feature_mins and artifacts.feature_maxs:
-            f_min = artifacts.feature_mins.get(feature_name)
-            f_max = artifacts.feature_maxs.get(feature_name)
-            
-            if f_min is not None and f_max is not None and f_max > f_min:
-                current_vals = adjusted[feature_name].clip(lower=f_min, upper=f_max)
-                
-                # Determine if higher values are better for this specific feature
-                # Typically, percentile, count, and size metrics are "higher is better"
-                # PPP metrics are "lower is better"
-                is_higher_better = any(token in feature_name for token in ["percentile", "count", "size"])
-                
-                if is_higher_better:
-                    talent_score = (current_vals - f_min) / (f_max - f_min)
-                else:
-                    # For PPP allowed, lower is better (so if current == f_min, score = 1.0)
-                    talent_score = (f_max - current_vals) / (f_max - f_min)
-                    
-                # delta > 0 is beneficial if higher is better, else delta < 0 is beneficial
-                is_beneficial = (delta > 0) if is_higher_better else (delta < 0)
-                
-                if is_beneficial:
-                    # Elite gets full benefit, bad gets minimum 10% benefit
-                    effective_scaler = talent_score.clip(lower=0.1)
-                else:
-                    # Elite masks the penalty (gets 10%), bad gets full penalty (100%)
-                    effective_scaler = (1.0 - talent_score).clip(lower=0.1)
-                    
-                scaled_delta = delta * effective_scaler
-                adjusted[feature_name] = adjusted[feature_name] + scaled_delta
-            else:
-                adjusted[feature_name] = adjusted[feature_name] + delta
-        else:
-            adjusted[feature_name] = adjusted[feature_name] + delta
-            
+
+        effective_scaler, _ = _calculate_effective_scaler(
+            features=adjusted,
+            feature_name=feature_name,
+            delta=delta,
+            artifacts=artifacts,
+        )
+        adjusted[feature_name] = adjusted[feature_name] + (delta * effective_scaler)
+
     return adjusted
+
+
+def calculate_scheme_fit_adjustment(
+    base_features: pd.DataFrame,
+    adjustments: dict[str, float],
+    artifacts: TrainingArtifacts | None = None,
+    fit_weight: float = SCHEME_FIT_WEIGHT,
+) -> float:
+    """
+    Convert scheme-feature fit into target-space points so recommendations can
+    meaningfully separate even when the regressor is only mildly sensitive to
+    the adjusted features.
+    """
+    fit_score = 0.0
+    for feature_name, delta in adjustments.items():
+        if feature_name not in base_features.columns or delta == 0:
+            continue
+
+        effective_scaler, feature_range = _calculate_effective_scaler(
+            features=base_features,
+            feature_name=feature_name,
+            delta=delta,
+            artifacts=artifacts,
+        )
+        normalized_delta = abs(delta) / feature_range
+        fit_score += normalized_delta * float(effective_scaler.iloc[0])
+
+    return fit_score * fit_weight
+
+
+def _calculate_effective_scaler(
+    features: pd.DataFrame,
+    feature_name: str,
+    delta: float,
+    artifacts: TrainingArtifacts | None = None,
+) -> tuple[pd.Series, float]:
+    if (
+        artifacts
+        and hasattr(artifacts, "feature_mins")
+        and hasattr(artifacts, "feature_maxs")
+        and artifacts.feature_mins
+        and artifacts.feature_maxs
+    ):
+        f_min = artifacts.feature_mins.get(feature_name)
+        f_max = artifacts.feature_maxs.get(feature_name)
+        if f_min is not None and f_max is not None and f_max > f_min:
+            feature_range = float(f_max - f_min)
+            current_vals = features[feature_name].clip(lower=f_min, upper=f_max)
+            talent_score = _calculate_talent_score(
+                current_vals=current_vals,
+                feature_name=feature_name,
+                feature_min=float(f_min),
+                feature_max=float(f_max),
+            )
+            is_beneficial = (delta > 0) if _is_higher_better(feature_name) else (delta < 0)
+            if is_beneficial:
+                return talent_score.clip(lower=0.1), feature_range
+            return (1.0 - talent_score).clip(lower=0.1), feature_range
+
+    default_scaler = pd.Series(1.0, index=features.index, dtype=float)
+    fallback_range = max(abs(delta), 1.0)
+    return default_scaler, fallback_range
+
+
+def _calculate_talent_score(
+    current_vals: pd.Series,
+    feature_name: str,
+    feature_min: float,
+    feature_max: float,
+) -> pd.Series:
+    if _is_higher_better(feature_name):
+        return (current_vals - feature_min) / (feature_max - feature_min)
+    return (feature_max - current_vals) / (feature_max - feature_min)
+
+
+def _is_higher_better(feature_name: str) -> bool:
+    return any(token in feature_name for token in ["percentile", "count", "size"])
 
 
 def _coerce_lineup_frame(lineup_row: pd.DataFrame | pd.Series) -> pd.DataFrame:

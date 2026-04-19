@@ -16,7 +16,7 @@ from src.models import (
 from src.models.training import prepare_training_matrices
 
 
-def plot_actual_vs_predicted(y_train_true, y_train_pred, y_test_true, y_test_pred, output_path: str = "data/processed/plots/actual_vs_predicted.png"):
+def plot_actual_vs_predicted(y_train_true, y_train_pred, y_test_true, y_test_pred, metrics=None, output_path: str = "data/processed/plots/actual_vs_predicted.png"):
     """Plot actual vs predicted values for both train and test sets."""
     plt.figure(figsize=(10, 8))
     
@@ -30,6 +30,21 @@ def plot_actual_vs_predicted(y_train_true, y_train_pred, y_test_true, y_test_pre
     max_val = max(y_train_true.max(), y_test_true.max(), y_train_pred.max(), y_test_pred.max())
     plt.plot([min_val, max_val], [min_val, max_val], 'r--', label='Perfect Prediction (y=x)', linewidth=2)
     
+    if metrics:
+        stats_text = (
+            "--- Train Metrics ---\n"
+            f"MAE:  {metrics['train_mae']:.4f}\n"
+            f"RMSE: {metrics['train_rmse']:.4f}\n"
+            f"R2:   {metrics['train_r2']:.4f}\n"
+            "--- Test Metrics ---\n"
+            f"MAE:  {metrics['test_mae']:.4f}\n"
+            f"RMSE: {metrics['test_rmse']:.4f}\n"
+            f"R2:   {metrics['test_r2']:.4f}"
+        )
+        props = dict(boxstyle='round', facecolor='white', alpha=0.8, edgecolor='gray')
+        plt.gca().text(0.05, 0.95, stats_text, transform=plt.gca().transAxes, fontsize=10,
+                verticalalignment='top', bbox=props, family='monospace')
+
     plt.xlabel('Actual Defensive Rating')
     plt.ylabel('Predicted Defensive Rating')
     plt.title('Actual vs Predicted Defensive Rating (Train & Test)')
@@ -101,5 +116,5 @@ if __name__ == "__main__":
     )
     pred_train = artifacts.model.predict(x_train)
     pred_test = artifacts.model.predict(x_test)
-    plot_actual_vs_predicted(y_train, pred_train, y_test, pred_test, "data/processed/plots/actual_vs_predicted.png")
+    plot_actual_vs_predicted(y_train, pred_train, y_test, pred_test, metrics=artifacts.metrics, output_path="data/processed/plots/actual_vs_predicted.png")
     print("Wrote Actual vs Predicted plot to data/processed/plots/actual_vs_predicted.png")

@@ -262,13 +262,13 @@ Not as:
 
 ## Documentation
 
-Full implementation history, failures, fixes, and interview notes:
+Full implementation history, failures, fixes, and technical rationale:
 
 ```text
 docs/implementation_log.md
 ```
 
-Short runbook for presentation day:
+Short runbook for operating the project:
 
 ```text
 docs/demo_instructions.txt

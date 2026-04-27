@@ -1,6 +1,6 @@
 # Implementation Log
 
-This document is the interview and presentation log for the project. It records what the system is trying to do, what was actually implemented, what failed, what was changed, and what the current metrics mean.
+This document records what the system is trying to do, what was implemented, what failed, what changed, and what the current metrics mean.
 
 ## Project Framing
 
@@ -17,12 +17,6 @@ Why this framing changed:
   - predicts lineup-level defensive outcome with ML
   - simulates how candidate coverages may change that outcome
   - recommends the lowest predicted defensive-cost option
-
-Interview version:
-
-- The model predicts lineup defensive outcome.
-- The recommendation layer is heuristic and simulation-based.
-- The project is ML-assisted recommendation, not end-to-end supervised scheme classification.
 
 ## End-to-End Pipeline
 
@@ -606,12 +600,6 @@ It is saying:
 
 - "given the public features we actually have, these are the most defensible levers for scheme simulation"
 
-### Interview version
-
-If asked how the JSON is generated:
-
-- "We use a data-driven proxy script that derives scheme adjustments from the current season database. For Drop, we proxy bigs by high roll-man defensive volume. For Switch, we proxy perimeter defenders by high ball-handler defensive volume. For Zone, we proxy team shell behavior using lineups that face the most spot-up volume. We then compare stronger or weaker cohorts inside those proxy groups to league-average values and store those differences as scheme deltas in `dynamic_scheme_profiles.json`."
-
 Why those heuristics were used:
 
 - public data does not include scheme labels
@@ -676,28 +664,6 @@ Known limitations:
 If asked what the biggest weakness is:
 
 - the biggest weakness is label quality for the final recommendation problem, not the mechanics of ingestion or model training
-
-## Best Interview Answers
-
-If asked "What does the ML do?":
-
-- It predicts lineup-level defensive outcome, primarily defensive rating.
-
-If asked "What does the heuristic do?":
-
-- It simulates how candidate coverages might shift the lineup feature profile before rescoring.
-
-If asked "Why not call it a classifier?":
-
-- Because the public NBA API does not provide true scheme labels, so a supervised scheme classifier would overstate what the data supports.
-
-If asked "Why did you add filtering thresholds?":
-
-- Because tiny lineup samples and one-off play-type possessions create unstable targets and toxic outliers.
-
-If asked "Why median imputation instead of mean?":
-
-- Because the mean is more sensitive to extreme outliers, which was exactly the failure mode we were worried about.
 
 ## Recent Commit Milestones
 

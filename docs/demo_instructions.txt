@@ -2,8 +2,8 @@ Dynamic Lineup Dependent Defensive Scheme Optimizer
 Demo Instructions
 
 Purpose
-This file is the quick runbook for presenting the project live.
-Use it when you need to run the system, explain the outputs, or recover from common setup issues.
+This file is the quick runbook for operating the project and understanding the output.
+Use it when you need to run the system or recover from common setup issues.
 
 1. What the project does
 The project takes a five player lineup, predicts the lineup's defensive outcome, simulates candidate coverages, and recommends the best scheme among Drop, Switch, and Zone.
@@ -46,7 +46,7 @@ python demo.py
 python demo.py --team BOS --limit 3
 python demo.py --search Brunson
 
-6. How to explain the output
+6. Output reference
 Typical output fields:
 - Baseline prediction
 - Actual target or estimated historical target
@@ -55,7 +55,7 @@ Typical output fields:
 - Top explanation rows
 - Source
 
-How to talk about them:
+Definitions:
 - Baseline prediction: the model's predicted defensive outcome for the lineup
 - Actual target: the true historical lineup defensive outcome when the exact lineup exists
 - Estimated historical target: a weighted estimate built from similar historical lineups when the exact lineup does not exist
@@ -97,10 +97,7 @@ If you see:
 - Source: synthetic_player_profile
 the demo could not find useful historical lineup evidence and fell back to a player-profile-only lineup row
 
-8. Good one sentence explanation
-"The model predicts lineup defensive outcome from lineup composition and defensive play type features, then simulates how Drop, Switch, and Zone change that outcome and recommends the lowest risk option."
-
-9. Good interview answers
+8. Design notes
 Why XGBoost?
 - It handles nonlinear interactions in tabular data better than a simple weighted formula.
 
@@ -114,7 +111,7 @@ Where is the heuristic?
 How does the recommendation work?
 - It adjusts the lineup features using scheme profiles, rescored each simulated scheme with the baseline model, and picks the lowest predicted defensive cost.
 
-10. Common issues
+9. Common issues
 Issue: NBA API blocks requests or times out
 Fix:
 - rerun later
@@ -129,16 +126,16 @@ Fix:
 Issue: the output has weird historical numbers
 Fix:
 - check whether the label says API defensive rating or fallback per 48
-- mention the source explicitly during the demo
+- check the `Source` field to see whether the lineup was exact, overlap-based, or synthetic
 
-11. Files to know before a presentation
+10. Key files
 - README.md
 - docs/implementation_log.md
 - docs/demo_instructions.txt
 - demo.py
 - src/models/scheme_profiles.py
 
-12. Best pre-demo command
-If you only have time for one check before presenting:
+11. Quick verification
+If you only have time for one run:
 
 python demo.py --players "Jalen Brunson" "Josh Hart" "Mikal Bridges" "OG Anunoby" "Karl-Anthony Towns"

@@ -1,35 +1,42 @@
 Dynamic Lineup Dependent Defensive Scheme Optimizer
-Demo Instructions
+Grader Runbook
 
 Purpose
-This file is the quick runbook for operating the project and understanding the output.
-Use it when you need to run the system or recover from common setup issues.
+This file is the shortest path for running and inspecting the project.
+Use it when you want to verify that the code runs, inspect the main outputs, and understand where the key documentation lives.
 
-1. What the project does
-The project takes a five player lineup, predicts the lineup's defensive outcome, simulates candidate coverages, and recommends the best scheme among Drop, Switch, and Zone.
-
-Important wording:
-- This is a lineup aware defensive scheme simulator and recommendation engine.
-- It is not a supervised defensive scheme classifier.
+1. Recommended order
+- Read `README.md` first.
+- Use this file for commands.
+- Use `docs/implementation_log.md` for major failures, fixes, and pivots.
+- Use `docs/feature_experiment_results.md` for the literature-backed feature experiments.
 
 2. Setup
 From the repo root:
 
 pip install -r requirements.txt
 
-3. Full pipeline
-Run these in order if you need fresh data:
+3. Core production pipeline
+Run these in order for the main project flow:
 
 python ingest.py
 python build_features.py
 python train_model.py
+python src/features/calculate_scheme_deltas.py
 
 What each step does:
-- ingest.py: pulls live NBA API data into SQLite and stores raw JSON snapshots
-- build_features.py: creates the lineup training dataset
-- train_model.py: trains the baseline XGBoost model and writes plots/feature importance
+- `ingest.py`
+  - pulls live NBA API data into SQLite
+  - stores raw JSON snapshots under `data/raw/`
+- `build_features.py`
+  - creates `data/processed/lineup_training_dataset.csv`
+- `train_model.py`
+  - trains the production XGBoost model
+  - writes metrics, feature importance, predictions, and diagnostic plots
+- `src/features/calculate_scheme_deltas.py`
+  - generates `data/processed/dynamic_scheme_profiles.json`
 
-4. Fastest live demo
+4. Fastest demo run
 Use player input directly:
 
 python demo.py --players "Jalen Brunson" "Josh Hart" "Mikal Bridges" "OG Anunoby" "Karl-Anthony Towns"
@@ -39,103 +46,128 @@ Other examples:
 python demo.py --players "Stephen Curry" "Brandin Podziemski" "Andrew Wiggins" "Draymond Green" "Kevon Looney"
 python demo.py --players "Jrue Holiday" "Derrick White" "Jaylen Brown" "Jayson Tatum" "Kristaps Porzingis"
 
-5. Historical lineup demo mode
-If you want to show existing lineups from the dataset instead of typing 5 players:
+5. Historical lineup mode
+If you want to inspect historical lineups already present in the dataset:
 
 python demo.py
 python demo.py --team BOS --limit 3
 python demo.py --search Brunson
 
-6. Output reference
-Typical output fields:
-- Baseline prediction
-- Actual target or estimated historical target
-- Recommended scheme
-- Scheme ranking
-- Top explanation rows
-- Source
+6. What to inspect after training
+Main numeric outputs:
+- `data/processed/lineup_training_dataset.csv`
+- `data/processed/feature_importance.csv`
+- `data/processed/model_predictions.csv`
+
+Main final-model plots:
+- `data/processed/plots/actual_vs_predicted.png`
+- `data/processed/plots/feature_importance_bar.png`
+- `data/processed/plots/residuals_vs_predicted.png`
+- `data/processed/plots/residual_distribution.png`
+- `data/processed/plots/prediction_error_boxplot.png`
+- `data/processed/plots/target_distribution.png`
+- `data/processed/plots/top_feature_correlation_heatmap.png`
+- `data/processed/plots/shap_summary.png`
+- `data/processed/plots/shap_bar.png`
+
+7. Feature experiment workflow
+If you want to reproduce the feature-ablation study:
+
+python refresh_feature_caches.py
+python run_feature_experiments.py
+python plot_feature_experiments.py
+
+Experiment outputs:
+- `data/processed/feature_experiment_results.csv`
+- `data/processed/feature_experiment_importances.csv`
+- `data/processed/plots/feature_experiment_results_summary.png`
+
+Interpretation writeup:
+- `docs/feature_experiment_results.md`
+
+8. Output reference
+Typical demo output fields:
+- `Baseline prediction`
+- `Actual target` or `Estimated historical target`
+- `Recommended scheme`
+- `Scheme ranking`
+- `Top explanation rows`
+- `Source`
 
 Definitions:
-- Baseline prediction: the model's predicted defensive outcome for the lineup
-- Actual target: the true historical lineup defensive outcome when the exact lineup exists
-- Estimated historical target: a weighted estimate built from similar historical lineups when the exact lineup does not exist
-- Recommended scheme: the best simulated scheme under the current model and scheme profiles
-- Scheme ranking: all candidate schemes ordered from best to worst predicted result
-- Top explanation rows: the features and adjustments that most influenced the simulated recommendation
-- Source: tells you whether the lineup came from an exact historical match, a weighted overlap estimate, or a synthetic fallback
+- `Baseline prediction`
+  - the model's predicted defensive outcome for the lineup
+- `Actual target (API defensive rating)`
+  - the true historical lineup defensive rating for an exact historical 5-man match
+- `Estimated historical target (weighted overlap)`
+  - a weighted estimate from similar historical lineups when the exact 5-man lineup does not exist
+- `Actual target (fallback per 48)`
+  - a backup target only if the advanced lineup endpoint did not provide a usable defensive rating
+- `Source`
+  - tells you whether the lineup came from an exact historical match, a weighted historical overlap estimate, or a synthetic fallback
 
-7. Important target note
-The lineup target now comes from the advanced lineup API view whenever available.
+9. What the project is and is not
+This project is:
+- a lineup-aware defensive scheme simulator and recommendation engine
 
-This means:
-- the project now uses real lineup DEF_RATING and POSS from the advanced endpoint
-- fallback points allowed per 48 is only a backup if the advanced view still fails
+This project is not:
+- a supervised defensive scheme classifier
 
-If you see:
-- Actual target (API defensive rating)
-that is the preferred case
+Reason:
+- the public NBA API does not provide possession-level `Drop`, `Switch`, or `Zone` labels
 
-If you see:
-- Estimated historical target (weighted overlap)
-that means the exact 5-man lineup did not exist in the data and the target was estimated from similar historical lineups
+10. What changed during the project
+Important pivots:
+- We initially used the wrong lineup endpoint view and had to switch to the advanced `LeagueDashLineups` view to obtain real `DEF_RATING` and `POSS`.
+- We originally relied too much on synthetic custom lineups and later changed the demo to prefer exact historical matches and weighted historical overlap.
+- We tested broader feature families because the baseline model relied heavily on player defensive rating aggregates.
+- The experiments showed that defensive rating aggregates still remained the strongest valid predictive signal.
 
-If you see:
-- Actual target (fallback per 48)
-that means the lineup row did not have a usable advanced defensive rating and the backup target was used
+Use these docs for the details:
+- `docs/implementation_log.md`
+- `docs/feature_experiment_results.md`
 
-If you see:
-- Source: exact_historical_lineup
-the demo found the true 5-man lineup in the dataset
+11. Key verified branch results
+From the current production `train_model.py` run:
+- train rows: `565`
+- test rows: `189`
+- train `R^2 = 0.2242`
+- train `MAE = 9.3111`
+- train `RMSE = 11.9291`
+- test `R^2 = 0.1319`
+- test `MAE = 10.3263`
+- test `RMSE = 12.8919`
 
-If you see:
-- Source: weighted_historical_overlap_4_plus
-- Source: weighted_historical_overlap_3
-- Source: weighted_historical_overlap_2
-the demo estimated the lineup from similar historical units with partial player overlap
+From the best valid feature-family ablation:
+- `player_def_rating_only`, tuned
+- test `R^2 = 0.1132`
+- test `MAE = 10.3952`
+- test `RMSE = 13.0303`
 
-If you see:
-- Source: synthetic_player_profile
-the demo could not find useful historical lineup evidence and fell back to a player-profile-only lineup row
-
-8. Design notes
-Why XGBoost?
-- It handles nonlinear interactions in tabular data better than a simple weighted formula.
-
-Why not call it a classifier?
-- Because the public NBA API does not provide true possession level scheme labels.
-
-Where is the heuristic?
-- Default fallback: src/models/scheme_profiles.py
-- Preferred runtime source when generated: data/processed/dynamic_scheme_profiles.json
-
-How does the recommendation work?
-- It adjusts the lineup features using scheme profiles, rescored each simulated scheme with the baseline model, and picks the lowest predicted defensive cost.
-
-9. Common issues
+12. Common issues
 Issue: NBA API blocks requests or times out
 Fix:
 - rerun later
-- keep the built in time.sleep delays
+- keep the built-in `time.sleep()` delays
 - do not remove backoff logic
 
 Issue: a player name is not found
 Fix:
-- use the player's full name as stored in the NBA API
-- be more specific if the name is ambiguous
+- use the player's full NBA API name
+- try the historical demo mode if the custom lineup is purely hypothetical
 
-Issue: the output has weird historical numbers
+Issue: output looks too noisy
 Fix:
-- check whether the label says API defensive rating or fallback per 48
-- check the `Source` field to see whether the lineup was exact, overlap-based, or synthetic
+- inspect the `Source` field
+- exact historical lineups are the strongest evidence
+- weighted overlap is weaker
+- synthetic fallback is the weakest
 
-10. Key files
-- README.md
-- docs/implementation_log.md
-- docs/demo_instructions.txt
-- demo.py
-- src/models/scheme_profiles.py
-
-11. Quick verification
-If you only have time for one run:
-
-python demo.py --players "Jalen Brunson" "Josh Hart" "Mikal Bridges" "OG Anunoby" "Karl-Anthony Towns"
+13. Key files
+- `README.md`
+- `docs/demo_instructions.txt`
+- `docs/implementation_log.md`
+- `docs/feature_experiment_results.md`
+- `train_model.py`
+- `demo.py`
+- `run_feature_experiments.py`

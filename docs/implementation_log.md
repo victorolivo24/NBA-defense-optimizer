@@ -43,8 +43,9 @@ Current demo flow:
 
 Important display note:
 
-- when a historical lineup target came from the fallback formula instead of a possession-based defensive rating field, the demo should label it as `Actual target (fallback per 48)`
-- when a custom lineup is estimated from partial historical overlap instead of an exact 5-man match, the demo should label that number as `Estimated historical target (weighted overlap)`, not as a true actual target
+- historical exact matches should show `Actual target (API defensive rating)` when available
+- overlap-based custom lineup estimates should show `Estimated historical target (weighted overlap)`
+- fallback targets should show `Actual target (fallback per 48)`
 
 ## Inputs and Outputs
 
@@ -55,14 +56,16 @@ Primary input:
 Supporting inputs:
 
 - season, for example `2024-25`
-- optional existing lineup search or team filters for fallback demo mode
+- optional existing lineup search or team filters for the historical demo mode
 
 Feature inputs used by the model:
 
 - lineup size
 - guard, forward, and center counts
 - average height and weight
-- play-type feature aggregates such as:
+- player defensive rating aggregates
+- player defensive box-score aggregates
+- Synergy play-type feature aggregates such as:
   - `isolation_ppp_mean`
   - `pick_and_roll_ball_handler_ppp_mean`
   - `pick_and_roll_roll_man_ppp_mean`
@@ -72,10 +75,6 @@ Feature inputs used by the model:
 Primary model output:
 
 - `defensive_rating_target`
-
-Alternative target:
-
-- `opponent_ppp_target`
 
 Recommendation output:
 
@@ -111,6 +110,11 @@ What ingestion does:
 - fetches five-man lineups from `LeagueDashLineups`
 - writes raw snapshots before transformation
 - upserts normalized records into SQLite
+
+Additional cache outputs on the feature-experiment branch:
+
+- `data/processed/player_defense_profiles.json`
+- `data/processed/lineup_basic_defense_profiles.json`
 
 Important operational note:
 
@@ -163,38 +167,35 @@ Fix:
 
 Result:
 
-- framing is more honest and easier to defend academically
+- framing is more honest and technically defensible
 
 ### 3. Demo originally selected historical lineups by minutes instead of taking user players
 
 Observed issue:
 
-- default demo was useful for presentation
-- but it did not reflect the intended product workflow
+- the original demo was useful for showing existing lineups
+- it did not match the intended product workflow
 
 Fix:
 
 - add player-name lookup
-- build synthetic lineup rows from five chosen players
-- run the recommendation directly on that synthetic lineup
+- support player-input custom lineups
 
 Result:
 
 - the demo is now player-input driven
 
-### 3b. Pure synthetic player-input lineups were not realistic enough
+### 4. Pure synthetic player-input lineups were not realistic enough
 
 Observed issue:
 
 - the first version of player-input mode built a synthetic lineup row only from the five players' defensive profiles
-- that could produce unrealistic predictions for real lineups, especially when the exact 5-man unit already existed in the historical lineup data
-- custom lineups also had no historical `actual target`, which made the output harder to trust and harder to explain
+- that could produce unrealistic predictions for real lineups, especially when the exact 5-man unit already existed historically
 
 Why this happened:
 
-- the synthetic row used player-level aggregates
-- it did not try to reuse real lineup-level evidence from `lineup_metrics`
-- so the model was forced to extrapolate from player traits alone
+- the synthetic row used player-level aggregates only
+- it did not reuse lineup-level evidence from `lineup_metrics`
 
 Fix:
 
@@ -203,13 +204,6 @@ Fix:
   2. weighted historical overlap blend from similar lineups
   3. pure synthetic player-profile fallback only if no meaningful lineup history exists
 
-How the overlap blend works:
-
-- parse the five input player IDs
-- scan historical lineups for shared players
-- ignore lineups with fewer than 2 shared players
-- weight matches by overlap strength and lineup minutes
-
 Current overlap weights:
 
 - 5 shared players: `1.0`
@@ -217,30 +211,13 @@ Current overlap weights:
 - 3 shared players: `0.4`
 - 2 shared players: `0.15`
 
-Why we chose this direction:
-
-- exact 5-man matches should dominate if they exist
-- 4-man overlap is strong evidence
-- 3-man overlap is usable but weaker
-- 2-man overlap provides only light contextual evidence and should not dominate the estimate
-
-What this improves:
+Result:
 
 - player-input recommendations now stay closer to real historical lineup behavior
-- exact known lineups can surface a real `actual target`
+- exact known lineups can surface a real target
 - unseen lineups still work through the synthetic fallback, but only after historical evidence is exhausted
 
-How this shows up in the demo:
-
-- the output now includes a `Source` field
-- common values include:
-  - `exact_historical_lineup`
-  - `weighted_historical_overlap_4_plus`
-  - `weighted_historical_overlap_3`
-  - `weighted_historical_overlap_2`
-  - `synthetic_player_profile`
-
-### 4. Training pipeline was too vulnerable to noise
+### 5. Training pipeline was too vulnerable to noise
 
 Observed issues:
 
@@ -259,30 +236,28 @@ Current defaults:
 - `DEFAULT_MIN_LINEUP_MINUTES = 10.0`
 - `DEFAULT_MIN_PLAY_TYPE_POSSESSIONS = 10.0`
 
-Why this matters:
+Result:
 
-- it reduces noise from tiny samples
-- it makes the training rows more stable
-- it reduces the impact of extreme outliers during imputation
+- less noise from tiny samples
+- more stable training rows
+- less distortion from extreme outliers
 
-### 5. We initially pulled the wrong lineup endpoint view for the target
+### 6. We initially pulled the wrong lineup endpoint view for the target
 
 Observed issue:
 
 - every lineup training row used the fallback target
-- `288 / 288` training rows were labeled `fallback_points_allowed_per_48`
-- `0 / 2000` stored lineup rows had possessions
-- the demo showed inflated historical targets like `161.12` for some OKC lineups
+- lineup targets looked inflated and unstable
 
 Root cause:
 
-- the ingestion code was calling `LeagueDashLineups` with `measure_type_detailed_defense='Defense'`
+- ingestion originally called `LeagueDashLineups` with `measure_type_detailed_defense='Defense'`
 - that returned a box-score-style lineup table with fields like `MIN`, `PTS`, `FGM`, and `FGA`
-- it did not return the advanced lineup fields we actually needed, such as `DEF_RATING`, `PACE`, and `POSS`
+- it did not return the advanced lineup fields we needed, such as `DEF_RATING`, `PACE`, and `POSS`
 
 How we discovered it:
 
-- we directly queried the endpoint in the repo environment with two parameter settings
+- we directly queried the endpoint with different parameter settings
 - `measure_type_detailed_defense='Defense'` returned no possession-based advanced columns
 - `measure_type_detailed_defense='Advanced'` returned:
   - `DEF_RATING`
@@ -296,26 +271,9 @@ Fix:
 - switch lineup ingestion to the advanced lineup view
 - keep the fallback target only as a backup when advanced fields are still missing
 
-Why this matters:
+Result:
 
-- it replaces a proxy target with a real API-provided lineup defensive rating whenever possible
-- it should reduce extreme target values caused by the per-48 fallback formula
-
-Post-fix verification:
-
-- `python ingest.py` succeeded with the advanced lineup view
-- rebuilt feature dataset size: `2060` rows
-- rebuilt training dataset source breakdown:
-  - `api_defensive_rating = 2060`
-  - `fallback_points_allowed_per_48 = 0`
-- database verification after the fix:
-  - `3149` total lineup rows stored
-  - `2000` lineup rows with possessions present from the advanced endpoint
-
-Interpretation:
-
-- the API does provide real lineup `DEF_RATING` and `POSS` when queried through the advanced lineup view
-- the earlier fallback-only dataset was caused by using the wrong lineup endpoint configuration, not by an unavoidable API limitation
+- the project now trains on real API-provided lineup defensive rating instead of the fallback-only target
 
 ## Modeling Decisions
 
@@ -326,7 +284,7 @@ Baseline model:
 Why XGBoost:
 
 - handles nonlinear interactions well
-- reasonable for tabular features
+- fits tabular data
 - supports feature importance and SHAP explanation
 
 What the model predicts:
@@ -336,96 +294,36 @@ What the model predicts:
 Target definition:
 
 - default target: `defensive_rating_target`
-- fallback target source: points allowed per 48 minutes when direct defensive rating is unavailable from the live lineup endpoint
 
-Why this fallback exists:
-
-- live lineup data did not reliably expose a direct defensive rating field in all cases
-
-How we now surface this clearly:
+How we make the target source explicit:
 
 - the engineered dataset includes `defensive_rating_target_source`
 - values are labeled as either:
   - `api_defensive_rating`
   - `fallback_points_allowed_per_48`
-- the demo output now prints that distinction directly instead of showing a generic `actual target`
 
 ## Recommendation Logic
 
-Where the heuristic lives:
+Where the default heuristic lives:
 
 - `src/models/scheme_profiles.py`
 
-Where the CLI entry point lives:
+Where the dynamic override comes from:
 
-- `recommend_scheme.py`
-
-How `recommend_scheme.py` works step by step:
-
-1. It creates a database session using `DEFAULT_DATABASE_URL`.
-2. It builds the full lineup training dataset for the selected season.
-3. It trains the baseline XGBoost model by calling `train_baseline_regressor(...)`.
-4. It tries to load `data/processed/dynamic_scheme_profiles.json`.
-5. If that JSON exists, it passes those dynamic profiles into the recommendation layer.
-6. If that JSON does not exist, it falls back to `DEFAULT_SCHEME_PROFILES` from `src/models/scheme_profiles.py`.
-7. It selects one lineup row from the dataset, currently `dataset.iloc[0]`, as the example lineup.
-8. It calls `recommend_scheme(lineup_row, artifacts, scheme_profiles=dynamic_profiles)`.
-9. It prints:
-   - the recommended scheme
-   - the predicted target value
-   - the ranked scheme table
-   - the top explanation rows
-
-Important current behavior:
-
-- `recommend_scheme.py` is an example CLI, not the player-input demo.
-- It uses an existing historical lineup from the dataset.
-- The player-input path lives in `demo.py`.
-
-How the actual recommendation function works:
-
-1. `src/models/recommendation.py` converts the lineup row into a one-row DataFrame.
-2. It makes sure the expected target columns exist.
-3. It converts that row into the same numeric feature layout used by the trained model.
-4. For each candidate scheme:
-   - copy the baseline feature row
-   - apply the scheme adjustments
-   - run the trained model on the adjusted row
-5. It stores one predicted value per scheme.
-6. It sorts the schemes from lowest predicted defensive cost to highest.
-7. It selects the top row as the final recommendation.
-8. If SHAP is available on the model, it adds baseline SHAP values to the explanation output.
+- `data/processed/dynamic_scheme_profiles.json`
 
 How recommendation works:
 
 1. build or load a lineup feature row
-2. run baseline prediction
-3. apply additive scheme profile adjustments
+2. run the baseline model
+3. apply scheme profile adjustments for each candidate scheme
 4. rescore each scheme-adjusted lineup
 5. choose the scheme with the lowest predicted value
 
 Important caveat:
 
-- the scheme profile adjustments are hand-set basketball heuristics
-- they are not learned from labeled historical scheme data
-
-Current profile source priority:
-
-1. `data/processed/dynamic_scheme_profiles.json` if it exists
-2. `src/models/scheme_profiles.py` otherwise
-
-This means:
-
-- the JSON file is an override
-- the hardcoded Python profiles are the default fallback
-
-How `apply_scheme_profile(...)` works:
-
-- It does not blindly add flat deltas anymore.
-- It uses `feature_mins` and `feature_maxs` from the training artifacts to compute a rough talent score for the lineup on each affected feature.
-- Beneficial changes are scaled up for stronger lineups.
-- Harmful changes are dampened for stronger lineups and hit weaker lineups more directly.
-- If the needed percentile bounds are unavailable, it falls back to a simple additive adjustment.
+- the scheme profile adjustments are not learned from true labeled historical scheme data
+- they are heuristic or proxy-driven, depending on whether the hardcoded or generated profiles are used
 
 ## Dynamic Scheme Profiles
 
@@ -450,228 +348,140 @@ How the generator works at a high level:
 4. Compare those proxy groups against league-average values.
 5. Store the difference as the scheme delta.
 
+Core proxy logic:
+
+- `Drop`
+  - uses high-volume roll-man defenders as the main proxy
+- `Switch`
+  - uses high-volume ball-handler defenders as the main proxy
+- `Zone`
+  - uses lineups with high spot-up possession exposure as the proxy
+
 Important caveat:
 
 - this is still heuristic
 - it is data-driven, but not truly supervised on scheme labels
-- the script never observes actual possession-level `Drop`, `Switch`, or `Zone` calls
-- instead, it uses basketball-informed proxy groups to estimate what those schemes should affect
 
-### How Drop deltas are chosen
+## Feature Experiment Branch
 
-Function:
+Branch goal:
 
-- `calculate_drop_deltas(...)`
+- test whether the model could be improved by replacing or supplementing the defensive-rating-driven features
 
-Core assumption:
+Motivation:
 
-- Drop coverage is anchored by bigs who defend the roll man well
+- baseline feature importance showed very heavy reliance on:
+  - `avg_player_def_rtg`
+  - `best_player_def_rtg`
+  - `worst_player_def_rtg`
 
-Proxy used:
+What was added:
 
-- players with top-20-percent possession volume in `Pick and Roll Roll Man`
+1. Player basic defensive box-score features
+- defensive rebounds
+- steals
+- blocks
+- defensive win shares
+- opponent points off turnovers
+- opponent second-chance points
+- opponent fast break points
+- opponent paint points
 
-Why this proxy:
+2. Lineup four-factor style features
+- `lineup_opp_efg_pct`
+- `lineup_opp_tov_rate`
+- `lineup_opp_orb_rate`
+- `lineup_opp_fta_rate`
 
-- those are the players most frequently involved in defending roll-man actions
-- in practice, that tends to approximate the bigs who would matter most in a Drop scheme
+3. Experiment infrastructure
+- `refresh_feature_caches.py`
+- `run_feature_experiments.py`
+- `plot_feature_experiments.py`
 
-What the script measures:
+Literature used to justify the experiments:
 
-- `pick_and_roll_roll_man_ppp_mean`
-  - compares the best quarter of those high-volume roll-man defenders to the average of that group
-  - this is treated as the main Drop benefit
-- `pick_and_roll_ball_handler_ppp_mean`
-  - compares the worst quarter of those same defenders on ball-handler defense to the group average
-  - this represents the idea that Drop can concede more pull-up or ball-handler comfort
-- `spot_up_ppp_mean`
-  - compares the worst quarter of those same defenders on Spot Up defense to the group average
-  - this reflects the idea that Drop can create more kick-out or late-contest perimeter looks
+- Four Factors and efficiency: https://arxiv.org/abs/2305.13032
+- unseen lineup prediction from player-level summaries: https://arxiv.org/abs/2303.04963
+- sparse and noisy lineup data: https://arxiv.org/abs/2601.15000
 
-Interpretation:
+Detailed experiment results live in:
 
-- Drop is modeled as helping the roll man matchup but potentially hurting ball-handler and spot-up outcomes
+- `docs/feature_experiment_results.md`
 
-### How Switch deltas are chosen
+High-level conclusion:
 
-Function:
-
-- `calculate_switch_deltas(...)`
-
-Core assumption:
-
-- Switch-heavy defenses depend on perimeter defenders who can survive on ball handlers and in isolation
-
-Proxy used:
-
-- players with top-40-percent possession volume in `Pick and Roll Ball Handler`
-
-Why this proxy:
-
-- these players are treated as guards and wings who are repeatedly involved in point-of-attack defense
-
-What the script measures:
-
-- `isolation_ppp_mean`
-  - compares the best quarter of those perimeter defenders in Isolation to the group average
-  - this is the main Switch benefit
-- `pick_and_roll_ball_handler_ppp_mean`
-  - compares the best quarter on ball-handler defense to the group average
-  - this represents the second main Switch benefit
-- `pick_and_roll_roll_man_ppp_mean`
-  - compares the worst quarter of those same defenders against Roll Man outcomes to the group average
-  - this represents Switch creating interior or mismatch problems
-
-Interpretation:
-
-- Switch is modeled as helping isolation and ball-handler defense while risking roll-man mismatch damage
-
-### How Zone deltas are chosen
-
-Function:
-
-- `calculate_zone_deltas(...)`
-
-Core assumption:
-
-- Zone is a team-level shell, so it should be inferred from lineup behavior rather than individual defender type
-
-Proxy used:
-
-- lineups with the highest spot-up possession volume
-- specifically, the top 15 percent of lineups by `spot_up_possessions_mean`
-
-Why this proxy:
-
-- Zone tends to wall off penetration and concede more perimeter spot-up looks
-- lineups that live in that kind of defensive profile are used as a stand-in for zone-like behavior
-
-What the script measures:
-
-- `isolation_ppp_mean`
-  - compares those zone-proxy lineups to the average lineup
-- `spot_up_ppp_mean`
-  - compares those zone-proxy lineups to the average lineup
-- `spot_up_percentile_mean`
-  - compares those zone-proxy lineups to the average lineup
-
-Interpretation:
-
-- Zone is modeled as reducing direct isolation pressure while usually increasing perimeter spot-up exposure
-
-### How the delta values are created
-
-The script does not pick values from thin air.
-
-For each relevant feature:
-
-1. compute the average value for the proxy group
-2. compute a stronger or weaker cohort inside that proxy group, usually the top or bottom quartile
-3. subtract the group average from the cohort value
-4. round the difference to 3 decimals
-
-That difference becomes the scheme delta written into the JSON.
-
-Example interpretation:
-
-- if elite roll-man defenders allow meaningfully less PPP than the average high-volume roll-man defender, that gap becomes a negative Drop adjustment on `pick_and_roll_roll_man_ppp_mean`
-
-### What "important to switch, zone, drop" means in this system
-
-The script treats these features as the important ones:
-
-- `Isolation`
-- `Pick and Roll Ball Handler`
-- `Pick and Roll Roll Man`
-- `Spot Up`
-- `Spot Up percentile`
-
-Why these matter:
-
-- they are the defensive play types we actually ingest from Synergy
-- they map reasonably well to common coverage tradeoffs
-- they are the clearest bridge between lineup personnel and scheme behavior
-
-So the system is not saying:
-
-- "these are the only things that matter in basketball"
-
-It is saying:
-
-- "given the public features we actually have, these are the most defensible levers for scheme simulation"
-
-Why those heuristics were used:
-
-- public data does not include scheme labels
-- the project still needed an interpretable simulation layer for `Drop`, `Switch`, and `Zone`
+- aggregated player defensive rating features remained the strongest valid predictive signal
+- player defensive box-score features were useful supplements
+- Synergy play-type features were weak on their own
+- more features did not materially lift `R^2`
 
 ## Evaluation and Metrics
 
 Training metrics used:
 
+- `R^2`
 - `MAE`
 - `RMSE`
 
-Recent verified training run after stricter filtering changes:
+Current verified production-model run from `train_model.py`:
 
-- after switching lineup ingestion to the advanced lineup view:
-  - train rows: `1545`
-  - test rows: `515`
-  - `MAE = 14.5110`
-  - `RMSE = 18.8088`
+- train rows: `565`
+- test rows: `189`
+- train `R^2 = 0.2242`
+- train `MAE = 9.3111`
+- train `RMSE = 11.9291`
+- test `R^2 = 0.1319`
+- test `MAE = 10.3263`
+- test `RMSE = 12.8919`
+
+Best valid feature-family ablation result:
+
+- `player_def_rating_only`, tuned
+- test `R^2 = 0.1132`
+- test `MAE = 10.3952`
+- test `RMSE = 13.0303`
 
 What these metrics mean:
 
 - the model is judged on how close its predicted lineup defensive outcome is to the stored historical target
 - these are baseline outcome-model metrics, not direct scheme recommendation accuracy metrics
+- the low `R^2` is likely partly structural because lineup-level NBA defensive outcomes are sparse and noisy
 
-## Verified Demo Example
+## Final Plots and Artifacts
 
-Verified player-input demo run:
+Main training artifacts:
 
-```bash
-python demo.py --players "Jalen Brunson" "Josh Hart" "Mikal Bridges" "OG Anunoby" "Karl-Anthony Towns"
-```
+- `data/processed/feature_importance.csv`
+- `data/processed/model_predictions.csv`
 
-Current interpretation of the player-input path:
+Main production-model plots:
 
-- if the exact lineup exists historically, the demo should label it as `Source: exact_historical_lineup`
-- if the lineup is estimated from overlapping historical evidence, the demo should label it as one of:
-  - `weighted_historical_overlap_4_plus`
-  - `weighted_historical_overlap_3`
-  - `weighted_historical_overlap_2`
-- only if no useful lineup history exists should it label the result as `synthetic_player_profile`
+- `data/processed/plots/actual_vs_predicted.png`
+- `data/processed/plots/feature_importance_bar.png`
+- `data/processed/plots/residuals_vs_predicted.png`
+- `data/processed/plots/residual_distribution.png`
+- `data/processed/plots/prediction_error_boxplot.png`
+- `data/processed/plots/target_distribution.png`
+- `data/processed/plots/top_feature_correlation_heatmap.png`
+- `data/processed/plots/shap_summary.png`
+- `data/processed/plots/shap_bar.png`
 
-What this demonstrates:
+Feature experiment outputs:
 
-- the demo can resolve five named players from the database
-- reuse exact historical lineup evidence when available
-- build a weighted overlap estimate when the exact lineup has not played together
-- fall back to a synthetic lineup profile only as a last resort
-- score all candidate schemes
-- return a recommendation with explanation rows
+- `data/processed/feature_experiment_results.csv`
+- `data/processed/feature_experiment_importances.csv`
+- `data/processed/plots/feature_experiment_results_summary.png`
 
 ## What Is Still Weak
 
 Known limitations:
 
 - no true public scheme labels
-- no possession-level coaching coverage ground truth
-- heuristic scheme profiles are manually specified
-- current recommendation evaluation is weaker than the baseline model evaluation
-- historical lineup targets can still be noisy even after thresholding
+- no opponent-aware recommendation layer
+- scheme profiles are still proxy-based, even when generated dynamically
+- historical lineup targets remain noisy
+- unseen custom lineups are weaker than exact historical matches
 
-If asked what the biggest weakness is:
+Largest unresolved weakness:
 
-- the biggest weakness is label quality for the final recommendation problem, not the mechanics of ingestion or model training
-
-## Recent Commit Milestones
-
-Important milestones in repo history:
-
-- `5af749e` `Fix live NBA API ingestion and proxy handling`
-- `88da58d` `Add Phase 3 baseline training pipeline`
-- `a3a630d` `score drop, switch, and zone, feature adjustments, rank schemes`
-- `4dc97b5` `Extract scheme simulator profiles`
-- `e2733a1` `Reframe project as simulation and recommendation engine`
-- `7914ede` `add demo modules`
+- label quality for the final recommendation problem is weaker than the mechanics of ingestion, feature engineering, or model training

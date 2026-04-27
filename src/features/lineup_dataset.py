@@ -22,34 +22,43 @@ DEFAULT_MIN_LINEUP_MINUTES = 25.0
 DEFAULT_MIN_LINEUP_POSSESSIONS = 50.0
 DEFAULT_MIN_PLAY_TYPE_POSSESSIONS = 10.0
 
-_PLAYER_DEF_RATINGS_CACHE: dict[str, dict[str, float]] | None = None
+_PLAYER_DEFENSE_PROFILES_CACHE: dict[str, dict[str, dict[str, float | None]]] | None = None
+_LINEUP_BASIC_PROFILES_CACHE: dict[str, dict[str, dict[str, float | str | None]]] | None = None
 
-def _get_player_def_ratings(season: str) -> dict[str, float]:
-    global _PLAYER_DEF_RATINGS_CACHE
-    if _PLAYER_DEF_RATINGS_CACHE is None:
-        path = Path("data/processed/player_def_ratings.json")
-        if path.exists():
-            try:
-                # the file is now {"season": {"player_id": rating}}
-                # or maybe just {"player_id": rating} if it's old.
-                # If it's old format, it won't have the season key, but we handle it.
-                data = json.loads(path.read_text())
-                if data and not any(k.count("-") == 1 for k in list(data.keys())[:5] if isinstance(k, str)):
-                     # Attempt to be robust if it's still old data, though ingest should overwrite it
-                     pass
-                _PLAYER_DEF_RATINGS_CACHE = data
-            except json.JSONDecodeError:
-                _PLAYER_DEF_RATINGS_CACHE = {}
-        else:
-            _PLAYER_DEF_RATINGS_CACHE = {}
-            
-    # Handle the transition from old format to new format gracefully
-    # If the root keys are seasons like "2024-25", return that season's mapping
-    if season in _PLAYER_DEF_RATINGS_CACHE:
-        return _PLAYER_DEF_RATINGS_CACHE[season]
-    
-    # Otherwise return empty mapping
-    return _PLAYER_DEF_RATINGS_CACHE.get(season, {})
+PLAYER_BASIC_STATS = (
+    "dreb",
+    "stl",
+    "blk",
+    "def_ws",
+    "opp_pts_off_tov",
+    "opp_pts_2nd_chance",
+    "opp_pts_fb",
+    "opp_pts_paint",
+)
+
+
+def _load_json_cache(path: str) -> dict:
+    file_path = Path(path)
+    if not file_path.exists():
+        return {}
+    try:
+        return json.loads(file_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+
+
+def _get_player_defense_profiles(season: str) -> dict[str, dict[str, float | None]]:
+    global _PLAYER_DEFENSE_PROFILES_CACHE
+    if _PLAYER_DEFENSE_PROFILES_CACHE is None:
+        _PLAYER_DEFENSE_PROFILES_CACHE = _load_json_cache("data/processed/player_defense_profiles.json")
+    return _PLAYER_DEFENSE_PROFILES_CACHE.get(season, {})
+
+
+def _get_lineup_basic_profiles(season: str) -> dict[str, dict[str, float | str | None]]:
+    global _LINEUP_BASIC_PROFILES_CACHE
+    if _LINEUP_BASIC_PROFILES_CACHE is None:
+        _LINEUP_BASIC_PROFILES_CACHE = _load_json_cache("data/processed/lineup_basic_defense_profiles.json")
+    return _LINEUP_BASIC_PROFILES_CACHE.get(season, {})
 
 
 def build_training_dataset(
@@ -105,7 +114,7 @@ def export_training_dataset(
 ) -> Path:
     """Build the training dataset and write it to disk."""
     session_factory = create_session_factory(database_url)
-    
+
     seasons_list = [season] if isinstance(season, str) else season
     datasets = []
     for s in seasons_list:
@@ -118,7 +127,7 @@ def export_training_dataset(
             min_play_type_possessions=min_play_type_possessions,
         )
         datasets.append(dataset)
-        
+
     final_dataset = pd.concat(datasets, ignore_index=True)
 
     path = Path(output_path)
@@ -201,13 +210,20 @@ def _build_player_feature_row(
     defensive_rating: float | None,
     opponent_ppp: float | None,
 ) -> dict[str, float | int | str | None]:
-    ratings_map = _get_player_def_ratings(season)
+    player_profiles = _get_player_defense_profiles(season)
     def_ratings = []
+    player_basic_aggregates: dict[str, list[float]] = {stat: [] for stat in PLAYER_BASIC_STATS}
+
     for player in players:
         pid_str = str(player.nba_player_id)
-        rating = ratings_map.get(pid_str, 115.0)
-        def_ratings.append(rating)
-        
+        profile = player_profiles.get(pid_str, {})
+        rating = profile.get("def_rating")
+        def_ratings.append(115.0 if rating is None else float(rating))
+        for stat in PLAYER_BASIC_STATS:
+            value = profile.get(stat)
+            if value is not None:
+                player_basic_aggregates[stat].append(float(value))
+
     avg_rating = _mean(def_ratings) if def_ratings else 115.0
     best_rating = min(def_ratings) if def_ratings else 115.0
     worst_rating = max(def_ratings) if def_ratings else 115.0
@@ -238,6 +254,17 @@ def _build_player_feature_row(
         "worst_player_def_rtg": worst_rating,
     }
 
+    for stat, values in player_basic_aggregates.items():
+        row[f"avg_player_{stat}"] = _mean(values)
+        row[f"max_player_{stat}"] = _max(values)
+
+    _add_lineup_basic_features(
+        row=row,
+        season=season,
+        lineup_key=lineup_key,
+        possessions=possessions,
+    )
+
     for play_type in play_types:
         normalized_name = _normalize_play_type_name(play_type)
         ppp_values = []
@@ -266,6 +293,35 @@ def _build_player_feature_row(
         row[f"{normalized_name}_percentile_min"] = _min(percentile_values)
 
     return row
+
+
+def _add_lineup_basic_features(
+    *,
+    row: dict[str, float | int | str | None],
+    season: str,
+    lineup_key: str,
+    possessions: float | None,
+) -> None:
+    profile = _get_lineup_basic_profiles(season).get(lineup_key)
+    if not profile:
+        row["lineup_opp_efg_pct"] = None
+        row["lineup_opp_tov_rate"] = None
+        row["lineup_opp_orb_rate"] = None
+        row["lineup_opp_fta_rate"] = None
+        return
+
+    fgm = _safe_float(profile.get("fgm"))
+    fga = _safe_float(profile.get("fga"))
+    fg3m = _safe_float(profile.get("fg3m"))
+    fta = _safe_float(profile.get("fta"))
+    oreb = _safe_float(profile.get("oreb"))
+    dreb = _safe_float(profile.get("dreb"))
+    tov = _safe_float(profile.get("tov"))
+
+    row["lineup_opp_efg_pct"] = _safe_ratio((fgm or 0.0) + 0.5 * (fg3m or 0.0), fga)
+    row["lineup_opp_tov_rate"] = _safe_ratio(tov, possessions)
+    row["lineup_opp_orb_rate"] = _safe_ratio(oreb, (oreb or 0.0) + (dreb or 0.0))
+    row["lineup_opp_fta_rate"] = _safe_ratio(fta, fga)
 
 
 def _find_play_type_metric(
@@ -339,6 +395,21 @@ def _resolve_target_source(
     return "synthetic_no_actual_target"
 
 
+def _safe_ratio(numerator: float | None, denominator: float | None) -> float | None:
+    if numerator is None or denominator in (None, 0):
+        return None
+    return float(numerator) / float(denominator)
+
+
+def _safe_float(value) -> float | None:
+    try:
+        if value is None or value == "":
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _mean(values: list[float | int | None]) -> float | None:
     filtered = [float(value) for value in values if value is not None]
     if not filtered:
@@ -358,5 +429,3 @@ def _max(values: list[float | int | None]) -> float | None:
     if not filtered:
         return None
     return max(filtered)
-
-

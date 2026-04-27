@@ -21,10 +21,20 @@ class XGBoostSchemeRecommender(BaseSchemeModel):
     - a scheme-aware model once true scheme supervision exists
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        tune_hyperparameters: bool = True,
+        search_iterations: int = 30,
+        search_n_jobs: int = 1,
+    ) -> None:
+        self.tune_hyperparameters = tune_hyperparameters
+        self.search_iterations = search_iterations
+        self.search_n_jobs = search_n_jobs
         self.model = XGBRegressor(
             objective="reg:squarederror",
             random_state=42,
+            n_jobs=1,
         )
         self.feature_names: list[str] = []
 
@@ -45,18 +55,37 @@ class XGBoostSchemeRecommender(BaseSchemeModel):
         base_model = XGBRegressor(
             objective="reg:squarederror",
             random_state=42,
+            n_jobs=1,
         )
-        
+
+        if not self.tune_hyperparameters:
+            base_model.set_params(
+                max_depth=3,
+                min_child_weight=3,
+                learning_rate=0.05,
+                reg_alpha=1,
+                reg_lambda=5,
+                n_estimators=150,
+                subsample=0.7,
+                colsample_bytree=0.8,
+            )
+            if sample_weight is not None:
+                base_model.fit(features, target, sample_weight=sample_weight)
+            else:
+                base_model.fit(features, target)
+            self.model = base_model
+            return
+
         search = RandomizedSearchCV(
             estimator=base_model,
             param_distributions=param_grid,
-            n_iter=30,
+            n_iter=self.search_iterations,
             cv=5,
             scoring="neg_root_mean_squared_error",
-            n_jobs=-1,
+            n_jobs=self.search_n_jobs,
             random_state=42,
         )
-        
+
         if sample_weight is not None:
             search.fit(features, target, sample_weight=sample_weight)
         else:

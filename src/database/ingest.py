@@ -111,6 +111,22 @@ def fetch_lineup_defense_stats(config: IngestConfig) -> pd.DataFrame:
     )
 
 
+def fetch_lineup_basic_defense_stats(config: IngestConfig) -> pd.DataFrame:
+    """Fetch five-man lineup basic defensive box-score stats."""
+    return _fetch_dataframe(
+        endpoint_name="lineup_defense_basic",
+        endpoint_factory=leaguedashlineups.LeagueDashLineups,
+        endpoint_kwargs={
+            "season": config.season,
+            "season_type_all_star": config.season_type,
+            "per_mode_detailed": "PerGame",
+            "measure_type_detailed_defense": "Defense",
+            "group_quantity": 5,
+        },
+        config=config,
+    )
+
+
 def upsert_players(session_factory, players_df: pd.DataFrame) -> None:
     """Insert or update player records from the player defense dataset."""
     session = session_factory()
@@ -274,6 +290,7 @@ def run_ingestion(config: IngestConfig | None = None) -> None:
     LOGGER.info("Fetching player defense stats for %s.", config.season)
     players_df = fetch_player_defense_stats(config)
     upsert_players(session_factory, players_df)
+    _write_player_defense_profiles(players_df, season=config.season)
 
     LOGGER.info("Fetching player advanced defense stats for %s.", config.season)
     try:
@@ -318,6 +335,16 @@ def run_ingestion(config: IngestConfig | None = None) -> None:
     except Exception as exc:
         LOGGER.warning(
             "Lineup ingestion failed. This is common with unstable NBA endpoints: %s",
+            exc,
+        )
+
+    LOGGER.info("Fetching lineup basic defensive stats for %s.", config.season)
+    try:
+        lineup_basic_df = fetch_lineup_basic_defense_stats(config)
+        _write_lineup_basic_profiles(lineup_basic_df, season=config.season)
+    except Exception as exc:
+        LOGGER.warning(
+            "Lineup basic defense cache generation failed. This is common with unstable NBA endpoints: %s",
             exc,
         )
 
@@ -458,6 +485,86 @@ def _fetch_dataframe(
     raise RuntimeError(
         f"Failed to fetch {endpoint_name} after {config.max_retries} attempts"
     ) from last_error
+
+
+def _write_player_defense_profiles(players_df: pd.DataFrame, season: str) -> None:
+    """Persist season-level player defensive box-score and rating features to JSON."""
+    mapping: dict[str, dict[str, float | None]] = {}
+    for row in players_df.to_dict(orient="records"):
+        player_id = _safe_int(row.get("PLAYER_ID"))
+        if player_id is None:
+            continue
+        mapping[str(player_id)] = {
+            "def_rating": _safe_float(row.get("DEF_RATING")),
+            "dreb": _safe_float(row.get("DREB")),
+            "stl": _safe_float(row.get("STL")),
+            "blk": _safe_float(row.get("BLK")),
+            "opp_pts_off_tov": _safe_float(row.get("OPP_PTS_OFF_TOV")),
+            "opp_pts_2nd_chance": _safe_float(row.get("OPP_PTS_2ND_CHANCE")),
+            "opp_pts_fb": _safe_float(row.get("OPP_PTS_FB")),
+            "opp_pts_paint": _safe_float(row.get("OPP_PTS_PAINT")),
+            "def_ws": _safe_float(row.get("DEF_WS")),
+        }
+
+    output_path = Path("data/processed/player_defense_profiles.json")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    existing = _load_json_mapping(output_path)
+    existing[season] = mapping
+    output_path.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+    LOGGER.info("Saved player defense profiles to %s", output_path)
+
+
+def _write_lineup_basic_profiles(lineups_df: pd.DataFrame, season: str) -> None:
+    """Persist season-level lineup basic defensive box-score stats to JSON."""
+    mapping: dict[str, dict[str, float | str | None]] = {}
+    for row in lineups_df.to_dict(orient="records"):
+        lineup_key = str(
+            row.get("GROUP_ID")
+            or row.get("LINEUP_ID")
+            or row.get("LINEUP_KEY")
+            or row.get("GROUP_NAME")
+            or ""
+        ).strip()
+        if not lineup_key:
+            continue
+        mapping[lineup_key] = {
+            "team_abbreviation": row.get("TEAM_ABBREVIATION"),
+            "minutes_played": _safe_float(row.get("MIN")),
+            "fgm": _safe_float(row.get("FGM")),
+            "fga": _safe_float(row.get("FGA")),
+            "fg3m": _safe_float(row.get("FG3M")),
+            "fg3a": _safe_float(row.get("FG3A")),
+            "ftm": _safe_float(row.get("FTM")),
+            "fta": _safe_float(row.get("FTA")),
+            "oreb": _safe_float(row.get("OREB")),
+            "dreb": _safe_float(row.get("DREB")),
+            "reb": _safe_float(row.get("REB")),
+            "ast": _safe_float(row.get("AST")),
+            "tov": _safe_float(row.get("TOV")),
+            "stl": _safe_float(row.get("STL")),
+            "blk": _safe_float(row.get("BLK")),
+            "blka": _safe_float(row.get("BLKA")),
+            "pf": _safe_float(row.get("PF")),
+            "pfd": _safe_float(row.get("PFD")),
+            "pts": _safe_float(row.get("PTS")),
+            "plus_minus": _safe_float(row.get("PLUS_MINUS")),
+        }
+
+    output_path = Path("data/processed/lineup_basic_defense_profiles.json")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    existing = _load_json_mapping(output_path)
+    existing[season] = mapping
+    output_path.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+    LOGGER.info("Saved lineup basic defense profiles to %s", output_path)
+
+
+def _load_json_mapping(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
 
 
 def _derive_opponent_ppp(defensive_rating: float | None) -> float | None:

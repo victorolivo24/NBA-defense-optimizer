@@ -111,6 +111,8 @@ def train_baseline_regressor(
     target_column: str = DEFAULT_TARGET_COLUMN,
     test_size: float = 0.25,
     random_state: int = 42,
+    tune_hyperparameters: bool = True,
+    search_iterations: int = 30,
 ) -> TrainingArtifacts:
     """Train and evaluate the baseline XGBoost regressor on the engineered lineup dataset."""
     features, target, weights = prepare_training_matrices(dataset, target_column=target_column)
@@ -125,7 +127,11 @@ def train_baseline_regressor(
         random_state=random_state,
     )
 
-    model = XGBoostSchemeRecommender()
+    model = XGBoostSchemeRecommender(
+        tune_hyperparameters=tune_hyperparameters,
+        search_iterations=search_iterations,
+        search_n_jobs=1,
+    )
     model.fit(x_train, y_train, sample_weight=w_train)
     
     train_predictions = model.predict(x_train)

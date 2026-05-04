@@ -7,6 +7,7 @@ __pycache__/
 tests/.tmp/
 pytest-cache-files-*/
 *.mp4
+!data-management-project-demo.mp4
 data/raw/*
 !data/raw/.gitkeep
 data/processed/*
